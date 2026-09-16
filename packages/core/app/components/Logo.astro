@@ -1,5 +1,6 @@
 ---
 import { getSiteObject } from '~/utils/site-object';
+import { MAJOR_KEY_ARTIFACT_REF_RE, publicPathForArtifactRef } from '@core/lib/artifact-paths';
 
 export interface Props {
   text?: string;
@@ -10,11 +11,65 @@ export interface Props {
 // than a client literal — this component is fleet law now. An explicit `text`
 // prop still wins.
 const site = getSiteObject();
-const { text = site?.logo.text ?? site?.name ?? '' } = Astro.props;
+const { text } = Astro.props;
+const logoText = text ?? site?.logo.text ?? site?.name ?? '';
+
+// site.logo.imageAssetRef, when present, holds a raw Major Key artifact ref
+// (e.g. `image/<id>/<sha256>.png`) — NOT a servable path. It must be run
+// through publicPathForArtifactRef (the /img/* netlify redirect) before it
+// can be an <img src>; the raw ref 404s as a relative URL, and handing it to
+// Astro's <Image>/getImage throws LocalImageUsedWrongly (that helper is for
+// local build-time assets, not blob-served runtime paths). We import the
+// pure packages/core/lib/artifact-paths.ts helper (not
+// server/lib/artifact-trust.ts) specifically because this component
+// resolves its markup at Astro BUILD time and cannot pull in
+// artifact-trust.ts's blob-store / node:crypto dependencies.
+//
+// HARD RULE: the mark renders as `<img src>` ONLY — never inline SVG, never
+// `set:html`, never fetched/embedded bytes at build time. Inlining the bytes
+// is the XSS vector this must not reopen; the /img/* endpoint serves with
+// `Content-Security-Policy: default-src 'none'` and `X-Content-Type-Options:
+// nosniff`, protections that only apply to the <img>/navigation-fetch case,
+// not to markup we'd have inlined ourselves.
+//
+// An explicit `text` prop (Header.astro's `logoText`) still wins over the
+// image mark, same precedence it already had over the derived text fallback.
+const imageRef = site?.logo.imageAssetRef;
+// `text === undefined`, not `!text`: the ORIGINAL default-parameter form
+// (`const { text = … } = Astro.props`) only fell back when the prop was
+// undefined, so a caller passing `text=""` has always rendered an EMPTY
+// wordmark. `!text` would have quietly turned that case into an image and
+// changed behaviour for a caller that asked for nothing.
+// `image/` specifically, not just "a Major Key": MAJOR_KEY_ARTIFACT_REF_RE also matches `pdf/…`, and
+// nothing upstream rules one out here — `imageAssetRef` is an ordinary `set_site_fields` field, so any
+// agent can write a pdf ref into it, `validateAssetRef` only checks Major-Key SHAPE, and
+// checkRenderableImageRefs exempts every `*AssetRef` key by name. Without this the masthead of every
+// page on the site renders `<img src="/pdf/…">`, i.e. a broken image, fleet-wide, from one wrong ref.
+const showImage = text === undefined && !!imageRef && MAJOR_KEY_ARTIFACT_REF_RE.test(imageRef) && imageRef.startsWith('image/');
+
+// The mark is the ONLY content of Header.astro's `<a href={getHomePermalink()}>`, so this alt IS that
+// link's accessible name — an empty one leaves the home link nameless (WCAG 2.4.4 / 4.1.2). `logoText`
+// can legitimately BE empty: site.v1 requires `logo.text` but allows `''`, and `??` only falls through
+// on null/undefined, never on the empty string. The text branch below renders that same empty value
+// visibly (a blank wordmark, obviously broken, unchanged behaviour); the image branch would instead
+// look perfectly fine while being invisible to a screen reader, so it falls back the one further step
+// `??` cannot. `site.name` is `z.string().min(1)` and `site` is non-null wherever `imageRef` is, so
+// this is guaranteed non-empty.
+const imageAlt = logoText || site?.name || '';
 ---
 
-<span
-  class="self-center ml-2 rtl:ml-0 rtl:mr-2 text-xl md:text-lg font-semibold tracking-[0.22em] text-gray-900 whitespace-nowrap dark:text-white"
->
-  {text}
-</span>
+{
+  showImage ? (
+    <img
+      src={publicPathForArtifactRef(imageRef!)}
+      alt={imageAlt}
+      class="self-center ml-2 rtl:ml-0 rtl:mr-2 h-8 md:h-7 w-auto max-w-[12rem] object-contain"
+    />
+  ) : (
+    <span
+      class="self-center ml-2 rtl:ml-0 rtl:mr-2 text-xl md:text-lg font-semibold tracking-[0.22em] text-gray-900 whitespace-nowrap dark:text-white"
+    >
+      {logoText}
+    </span>
+  )
+}

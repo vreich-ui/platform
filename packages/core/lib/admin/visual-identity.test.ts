@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildVisualIdentityViewModel } from './visual-identity.js';
+import { buildSetSiteLogoOp, buildVisualIdentityViewModel } from './visual-identity.js';
 
 const site = {
   object_id: 'site_example',
@@ -90,4 +90,32 @@ test('visual identity lens does not turn an untrusted site value into a preview 
     artifacts: [],
   });
   assert.equal(model.previewUrl, undefined);
+});
+
+// ─── buildSetSiteLogoOp (T2.2) ──────────────────────────────────────────────
+
+const MAJOR_KEY_REF = 'image/req_abc123/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png';
+
+test('buildSetSiteLogoOp emits the exact set_site_fields op for a valid Major Key ref', () => {
+  assert.deepEqual(buildSetSiteLogoOp({ artifactRef: MAJOR_KEY_REF }), {
+    op: 'set_site_fields',
+    fields: { logo: { imageAssetRef: MAJOR_KEY_REF } },
+  });
+});
+
+test('buildSetSiteLogoOp refuses a non-Major-Key string rather than emit a half-op', () => {
+  assert.equal(buildSetSiteLogoOp({ artifactRef: '/img/req_abc123/aaaa.png' }), undefined);
+  assert.equal(buildSetSiteLogoOp({ artifactRef: 'not-a-ref-at-all' }), undefined);
+});
+
+test('buildSetSiteLogoOp refuses an empty or missing artifactRef', () => {
+  assert.equal(buildSetSiteLogoOp({ artifactRef: '' }), undefined);
+  assert.equal(buildSetSiteLogoOp({ artifactRef: '   ' }), undefined);
+  assert.equal(buildSetSiteLogoOp({}), undefined);
+});
+
+test('buildSetSiteLogoOp never emits brandTokens, brandImagery or tracking — only logo', () => {
+  const op = buildSetSiteLogoOp({ artifactRef: MAJOR_KEY_REF });
+  assert.ok(op);
+  assert.deepEqual(Object.keys(op.fields), ['logo']);
 });

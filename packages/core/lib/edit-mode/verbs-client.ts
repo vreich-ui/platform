@@ -10,6 +10,7 @@
  */
 import { LockManager, type LockState } from '../admin/lock-manager.js';
 import { requestObjectSuggestion, type ObjectSuggestionRequest } from '../admin/ask-ai-object-selection.js';
+import { rawArtifactRefForPublicPath } from '../artifact-paths.js';
 
 const OBJECT_ENDPOINT = '/.netlify/functions/admin-object';
 const RELEASE_ENDPOINT = '/.netlify/functions/admin-release';
@@ -145,7 +146,19 @@ export const askAiSuggestion = (
   request: ObjectSuggestionRequest
 ): ReturnType<typeof requestObjectSuggestion> => requestObjectSuggestion(request, getToken);
 
-export type UploadImageResult = { ok: true; publicPath: string } | { ok: false; error: string };
+/**
+ * T2.1: `artifactRef` rides ALONGSIDE `publicPath`, not instead of it — a
+ * *AssetRef field (e.g. `site.logo.imageAssetRef`) holds the RAW Major Key
+ * (`image/<id>/<sha256>.ext`), never the servable `/img/...` path
+ * (`publicPathForArtifactRef`'s whole point, artifact-paths.ts), while every
+ * existing caller here (`edit-mode/ui.ts`) writes a section's `src` and wants
+ * the servable path. Only this function has both forms in hand — the intent
+ * endpoint hands back `publicPath` and nothing else — so it computes the raw
+ * ref once here rather than making every *AssetRef caller re-derive it.
+ */
+export type UploadImageResult =
+  | { ok: true; publicPath: string; artifactRef: string }
+  | { ok: false; error: string };
 
 /**
  * Push an image into the blobs `artifacts` store — the pdf-tool pattern for
@@ -202,7 +215,7 @@ export const uploadImageArtifact = async (
     return { ok: false, error: upload.error ?? `Upload failed (${uploadResponse.status})` };
   }
 
-  return { ok: true, publicPath: intent.publicPath };
+  return { ok: true, publicPath: intent.publicPath, artifactRef: rawArtifactRefForPublicPath(intent.publicPath) };
 };
 
 export type EnsureBlobImageResult = { ok: true; publicPath: string; mirrored: boolean } | { ok: false; error: string };

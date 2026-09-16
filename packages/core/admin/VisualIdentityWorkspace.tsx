@@ -26,6 +26,7 @@
  * control belongs wherever a chat lives, not on this one route).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 
 import { AdminShell } from './AdminShell';
 import { AgentRail } from './AgentRail';
@@ -60,13 +61,14 @@ import {
   readDockedChatId,
   writeDockedChatId,
 } from '@core/lib/admin/docked-chat-session';
-import { callObjectVerb } from '@core/lib/edit-mode/verbs-client';
-import { buildVisualIdentityViewModel, type VisualIdentityViewModel } from '@core/lib/admin/visual-identity';
+import { callObjectVerb, EditSession, uploadImageArtifact, type GetToken } from '@core/lib/edit-mode/verbs-client';
+import { buildSetSiteLogoOp, buildVisualIdentityViewModel, type VisualIdentityViewModel } from '@core/lib/admin/visual-identity';
 import { chatRunJustFinished } from '@core/lib/admin/visual-identity-live-refresh';
 import {
   VISUAL_IDENTITY_STARTER_HREF,
   VISUAL_IDENTITY_TAB_LABELS,
   VISUAL_IDENTITY_TABS,
+  blobKeyFromPreviewUrl,
   parseVisualIdentityTab,
   type BrandImageryOverridePolicy,
   type VisualIdentityChatIntent,
@@ -182,10 +184,16 @@ function IdentityBoard({
   model,
   identity,
   onRetheme,
+  getToken,
+  onChanged,
 }: {
   model: VisualIdentityViewModel;
   identity: SiteIdentity;
   onRetheme: () => void;
+  /** T2.3: both "Mark" write actions need a token for their own `EditSession`. */
+  getToken: GetToken;
+  /** T2.3: reload every panel after a successful logo write, `PdfTemplatesPanel`'s `onChanged` pattern. */
+  onChanged: () => void | Promise<void>;
 }) {
   // PERF: the logo preview below is expensive to mount (an authenticated
   // image fetch) but sits inside a `<details>` that opens on demand — a
@@ -197,6 +205,125 @@ function IdentityBoard({
   // second open is instant, from the loader's own cache, rather than a
   // repeat fetch.
   const [hasOpenedLogoPreview, setHasOpenedLogoPreview] = useState(false);
+
+  // T2.3: the "Mark" card's two write actions. Only one can be in flight —
+  // both take the SAME site checkout, so a second click while one is running
+  // would just contend the lock this session already holds.
+  const [logoBusy, setLogoBusy] = useState<'upload' | 'use-existing' | undefined>(undefined);
+  const [logoMessage, setLogoMessage] = useState<{ tone: 'success' | 'error'; text: string } | undefined>(undefined);
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Shared by both write actions — they differ only in where `artifactRef`
+   * comes from. Structural template: PdfTemplatesPanel.tsx's `pinKind`
+   * (packages/core/admin/PdfTemplatesPanel.tsx ~L191-220) — ensure checkout →
+   * patch → checkin, same "checked out by" phrasing, so a lock held by
+   * someone else reads identically across every site-checkout write on this
+   * page.
+   */
+  const applyLogoRef = useCallback(
+    async (artifactRef: string) => {
+      const op = buildSetSiteLogoOp({ artifactRef });
+      if (!op) {
+        setLogoMessage({ tone: 'error', text: 'That image has no usable storage reference — nothing was saved.' });
+        return;
+      }
+      const session = new EditSession('site', identity.siteId, getToken);
+      try {
+        const checkout = await session.ensureCheckout();
+        if (!checkout.ok) {
+          setLogoMessage({
+            tone: 'error',
+            text: `The publication is checked out by ${checkout.heldBy ?? 'someone else'}.`,
+          });
+          return;
+        }
+        const result = await session.patch([op]);
+        if (!result.ok) {
+          setLogoMessage({ tone: 'error', text: result.error });
+          return;
+        }
+        // REQUIRED UX: a patch is a draft write to the object store, not a
+        // deploy (CLAUDE.md #2, "Publish ≠ release") — the renderer reads a
+        // BUILD-TIME static import of sites/<slug>/data/site/site.json
+        // (app/utils/site-object.ts), so nothing a visitor sees changes until
+        // this object is published AND the publication is released to
+        // production. Saying so inline, once, is the whole point of this
+        // message — a bare "Saved" here would be a lie by omission.
+        setLogoMessage({
+          tone: 'success',
+          text: 'Logo saved, but not live yet. It goes live after this object is published and the publication is released to production.',
+        });
+        await onChanged();
+      } catch (reason) {
+        setLogoMessage({
+          tone: 'error',
+          text: reason instanceof Error ? reason.message : 'The logo could not be saved.',
+        });
+      } finally {
+        await session.checkin().catch(() => undefined);
+      }
+    },
+    [getToken, identity.siteId, onChanged]
+  );
+
+  const onLogoFileSelected = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      // Reset immediately so re-selecting the SAME file after a failed
+      // upload still fires a change event.
+      event.target.value = '';
+      if (!file) return;
+      setLogoBusy('upload');
+      setLogoMessage(undefined);
+      try {
+        const upload = await uploadImageArtifact(getToken, identity.siteId, file);
+        if (!upload.ok) {
+          setLogoMessage({ tone: 'error', text: upload.error });
+          return;
+        }
+        await applyLogoRef(upload.artifactRef);
+      } catch (reason) {
+        // `uploadImageArtifact` REJECTS on a transport fault — it awaits two
+        // bare `fetch`es (intent, then bytes) and neither is wrapped, so an
+        // offline browser or a dropped connection throws rather than returning
+        // `{ ok: false }`. With only a `finally` here that rejection escaped as
+        // an unhandled promise rejection and the operator watched "Uploading…"
+        // snap back to idle with nothing said. `applyLogoRef` already catches
+        // its own half (as PdfTemplatesPanel's writes do); this is the missing
+        // other half.
+        setLogoMessage({
+          tone: 'error',
+          text: reason instanceof Error ? reason.message : 'The logo could not be uploaded.',
+        });
+      } finally {
+        setLogoBusy(undefined);
+      }
+    },
+    [applyLogoRef, getToken, identity.siteId]
+  );
+
+  const useAvailableLogo = useCallback(async () => {
+    // `model.availableLogo.preview_url` is `admin-get-blob-image?blobKey=…` —
+    // the RAW Major Key ref, already in the form `logo.imageAssetRef` wants —
+    // not a `/img/...` public path, so no `rawArtifactRefForPublicPath`
+    // conversion applies here (visual-identity-imagery.ts's own
+    // `blobKeyFromPreviewUrl` doc comment: reading it back out of the
+    // projection's own URL is the only lossless route).
+    const blobKey = blobKeyFromPreviewUrl(model.availableLogo?.preview_url);
+    if (!blobKey) {
+      setLogoMessage({ tone: 'error', text: 'That image has no usable storage reference — nothing was saved.' });
+      return;
+    }
+    setLogoBusy('use-existing');
+    setLogoMessage(undefined);
+    try {
+      await applyLogoRef(blobKey);
+    } finally {
+      setLogoBusy(undefined);
+    }
+  }, [applyLogoRef, model.availableLogo]);
+
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -268,7 +395,50 @@ function IdentityBoard({
                     <ArtifactStagePreview artifact={model.availableLogo} size="thumbnail" />
                   ) : null}
                 </div>
+                <Button
+                  variant="secondary"
+                  className="mt-3"
+                  onClick={useAvailableLogo}
+                  disabled={logoBusy !== undefined}
+                >
+                  {logoBusy === 'use-existing' ? 'Saving…' : 'Use this logo'}
+                </Button>
               </details>
+            ) : null}
+            {/* T2.3: the write half of the "Mark" card. `accept` mirrors
+                edit-mode/ui.ts's own canvas upload input exactly — do not
+                widen it; SVG is rejected on every path down to the intent
+                endpoint (canvas-upload-intent.ts), so offering it here would
+                only buy the operator a confusing failure after the file
+                picker closes. */}
+            <input
+              ref={logoFileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              hidden
+              onChange={onLogoFileSelected}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => logoFileInputRef.current?.click()}
+                disabled={logoBusy !== undefined}
+              >
+                {logoBusy === 'upload' ? 'Uploading…' : 'Upload a logo'}
+              </Button>
+            </div>
+            {logoMessage ? (
+              <p
+                role="status"
+                aria-live="polite"
+                className={
+                  logoMessage.tone === 'error'
+                    ? 'text-[length:var(--adm-text-sm)] text-[var(--adm-danger-text)]'
+                    : 'text-[length:var(--adm-text-sm)] text-[var(--adm-success-text)]'
+                }
+              >
+                {logoMessage.text}
+              </p>
             ) : null}
           </div>
         </Card>
@@ -659,7 +829,13 @@ function VisualIdentityBody({
         label: VISUAL_IDENTITY_TAB_LABELS.identity,
         content:
           model && site ? (
-            <IdentityBoard model={model} identity={identity} onRetheme={() => runIntent(RETHEME_INTENT)} />
+            <IdentityBoard
+              model={model}
+              identity={identity}
+              onRetheme={() => runIntent(RETHEME_INTENT)}
+              getToken={getToken}
+              onChanged={load}
+            />
           ) : (
             <PanelState
               label="the brand board"

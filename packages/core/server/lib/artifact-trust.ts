@@ -1,36 +1,21 @@
 import { listArtifactIndexKeys, type ArtifactIndexStore } from './artifact-index.js';
 import { isArtifactReference } from './artifacts.js';
 
-/** Matches a Major Key artifact reference: {image|pdf}/{id}/{sha256-64-hex}.{ext} */
-export const MAJOR_KEY_ARTIFACT_REF_RE = /^(image|pdf)\/[^/]+\/[0-9a-f]{64}\.[a-z]+$/i;
-
-/**
- * The PUBLIC, servable path for a raw Major Key artifact ref — the inverse of
- * the netlify redirects (`/img/* → get-public-image?blobKey=image/:splat`,
- * `/pdf/* → get-public-pdf?blobKey=pdf/:splat`). A raw blob key
- * (`image/<id>/<sha>.ext`) is NOT servable as-is; the browser resolves it as a
- * relative path (404) and Astro's `<Image>`/`getImage` throws
- * `LocalImageUsedWrongly`. Renderable `src`/`ogImage`/`portrait.src` fields
- * must carry THIS path — only the trusted `*AssetRef` fields hold the raw ref.
- * Returns the input unchanged when it is not a raw Major Key ref.
- */
-export const publicPathForArtifactRef = (ref: string): string => {
-  if (!MAJOR_KEY_ARTIFACT_REF_RE.test(ref)) return ref;
-  return ref.startsWith('pdf/') ? `/pdf/${ref.slice('pdf/'.length)}` : `/img/${ref.slice('image/'.length)}`;
-};
-
-/** Matches the PUBLIC servable path form: /img|/pdf/{id}/{sha256}.{ext} (see publicPathForArtifactRef). */
-export const PUBLIC_ARTIFACT_PATH_RE = /^\/(img|pdf)\/[^/]+\/[0-9a-f]{64}\.[a-z]+$/i;
-
-/**
- * The inverse of publicPathForArtifactRef: a /img|/pdf public path back to its
- * raw Major Key blobKey (for artifact-index lookups). Returns the input
- * unchanged when it is not a public artifact path.
- */
-export const rawArtifactRefForPublicPath = (path: string): string => {
-  if (!PUBLIC_ARTIFACT_PATH_RE.test(path)) return path;
-  return path.startsWith('/pdf/') ? `pdf/${path.slice('/pdf/'.length)}` : `image/${path.slice('/img/'.length)}`;
-};
+// MAJOR_KEY_ARTIFACT_REF_RE / publicPathForArtifactRef / PUBLIC_ARTIFACT_PATH_RE /
+// rawArtifactRefForPublicPath moved to packages/core/lib/artifact-paths.ts on
+// 2026-09-16: Logo.astro needs publicPathForArtifactRef at Astro BUILD time,
+// and this file transitively pulls in ./artifact-index.js -> ./blob-list.js
+// (Netlify Blobs) plus node:path/crypto, none of which a build-time component
+// can import. Imported (not just re-exported) because this file still uses
+// MAJOR_KEY_ARTIFACT_REF_RE below; re-exported so every existing
+// `from './artifact-trust.js'` caller keeps working unchanged.
+import {
+  MAJOR_KEY_ARTIFACT_REF_RE,
+  PUBLIC_ARTIFACT_PATH_RE,
+  publicPathForArtifactRef,
+  rawArtifactRefForPublicPath,
+} from '../../lib/artifact-paths.js';
+export { MAJOR_KEY_ARTIFACT_REF_RE, PUBLIC_ARTIFACT_PATH_RE, publicPathForArtifactRef, rawArtifactRefForPublicPath };
 
 /**
  * The trust state for one workflow record's artifact references.
