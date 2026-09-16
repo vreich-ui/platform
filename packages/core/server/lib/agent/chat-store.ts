@@ -222,6 +222,14 @@ export const chatRunSchema = z.object({
    * Manager the editor had picked something new when they had not.
    */
   origin_selection: z.object({ object_type: z.string().max(128), object_id: z.string().max(256) }).optional(),
+  /**
+   * PCL-P4: the starter chip key this turn's opening text still traces back
+   * to, when it does — stamped at send time like the rest of this family,
+   * because (unlike `ChatDoc.origin_starter` below) a chip can be clicked on
+   * any send while the transcript is still empty, not only at chat creation.
+   * `engine.ts`'s `buildTurnOrigin` prefers this over the doc-level field.
+   */
+  origin_starter: z.string().max(64).optional(),
   trigger_token: z.string().optional(),
   transcript: z.array(chatMsgSchema),
   call_queue: z.array(chatToolCallSchema),

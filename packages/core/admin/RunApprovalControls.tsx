@@ -7,6 +7,8 @@ import {
   readPersistedRunApprovalMode,
   readPersistedTestMode,
   runModeControl,
+  RUN_MODE_OPTION_HINTS,
+  RUN_MODE_SCOPE_HINT,
   shouldAutoApproveRunTool,
   writePersistedRunApprovalMode,
   writePersistedTestMode,
@@ -51,7 +53,7 @@ export function RunApprovalControls({
   const items: MenuItem[] = testGate.options.map((option) => ({
     id: option.value,
     label: option.label,
-    title: option.value === 'safe-run' ? 'Continue through every action this run proposes without asking. You can still deny or switch back.' : undefined,
+    title: RUN_MODE_OPTION_HINTS[option.value],
     onSelect: () => onChange(option.value),
   }));
 
@@ -61,16 +63,29 @@ export function RunApprovalControls({
         align="start"
         items={items}
         trigger={({ ref, open, onToggle }) => (
-          <button
-            ref={ref}
-            type="button"
-            onClick={onToggle}
-            aria-haspopup="menu"
-            aria-expanded={open}
-            className="adm-focusable inline-flex items-center gap-1 whitespace-nowrap rounded-[var(--adm-radius-pill)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:bg-[var(--adm-surface-sunken)] hover:text-[var(--adm-text)]"
-          >
-            {currentLabel} ▾
-          </button>
+          // PCL-P2 — a hover explanation on the TRIGGER itself, not only on
+          // the menu's own items, so the scope constraint (`RUN_MODE_SCOPE_HINT`'s
+          // doc comment) is visible without ever opening the menu. This
+          // control is never disabled, so this is a plain hover Popover
+          // rather than the D3 disabled-with-reason pattern — there is
+          // nothing to gate, only something to explain.
+          <Popover
+            mode="hover"
+            content={RUN_MODE_SCOPE_HINT}
+            trigger={(a11y) => (
+              <button
+                ref={ref}
+                type="button"
+                onClick={onToggle}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                {...a11y}
+                className="adm-focusable inline-flex items-center gap-1 whitespace-nowrap rounded-[var(--adm-radius-pill)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:bg-[var(--adm-surface-sunken)] hover:text-[var(--adm-text)]"
+              >
+                {currentLabel} ▾
+              </button>
+            )}
+          />
         )}
       />
       {onTestModeChange ? (

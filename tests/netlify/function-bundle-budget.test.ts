@@ -304,16 +304,30 @@ const BUDGETS_KB: Record<string, number> = {
   //
   // 3536 -> 3552 (CHAT-ORIGIN, 2026-09-16). Looked for the edge first, as the
   // note above asks, and there is none: the module SET is byte-for-byte the
-  // same 263 modules before and after this change (measured off the metafile
-  // on the same tree, HEAD vs. working copy — 3530 KB -> 3543 KB). The client
-  // helper that derives the surface slug (`lib/admin/chat-origin.ts`) is
-  // browser-side and is deliberately NOT reachable from this function; what
-  // grew is `context.origin` plumbing and its comments inside five modules
-  // already in the graph (engine.ts, chat-store.ts, cms-agent-client.ts,
-  // loop.ts, admin-agent-chat.ts). Most of those bytes explain why a field
-  // sent one agent rev too early burns the turn_id permanently — the single
-  // most expensive thing to relearn on this wire. 9 KB of headroom.
-  'admin-agent-chat': 3552,
+  // same 263 modules before and after that change. What grew is
+  // `context.origin` plumbing and its comments inside five modules already in
+  // the graph. Most of those bytes explain why a field sent one agent rev too
+  // early burns the turn_id permanently.
+  // 3552 -> 3568 (PCL-P1, C-20, 2026-09-16). ONE new first-party module,
+  // `agent/pending-approval-lock.ts` (263 -> 264): the approval-card lock
+  // heartbeat the `get_chat` poll drives. Its transitive deps (`object-lock`,
+  // `object-store-keys`, the record schema) were already in this graph, so
+  // this is not a new import EDGE into a heavy subtree — it is the module's
+  // own ~5 KB, most of it the comment explaining why the heartbeat is driven
+  // by the browser poll and never by a server timer.
+  //
+  // PCL-P4 (starter chips, 2026-09-16, rebased onto CHAT-ORIGIN): stays UNDER
+  // the existing cap — no raise from PCL-P1's. ONE new first-party module,
+  // `lib/admin/starter-chips.ts`: the chip-deriving pure function
+  // `chatSummary` calls on an object-kind chat, plus one more optional field
+  // (`origin_starter`) threaded through the already-present CHAT-ORIGIN
+  // plumbing in `agent/chat-store.ts` / `agent/loop.ts` / `agent/engine.ts` /
+  // `functions/admin-agent-chat.ts`. `buildObjectContract` was already in
+  // this graph (via `agent/context.ts`), so this is the module's own weight,
+  // not a new edge into the registry's zod trees. Measured after this
+  // rebase: 3563.9 KB / 265 modules, so 4.1 KB of headroom — cap held at
+  // PCL-P1's 3568, not raised.
+  'admin-agent-chat': 3568,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */

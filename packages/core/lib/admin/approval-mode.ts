@@ -15,6 +15,32 @@ export const RUN_MODE_OPTIONS: readonly RunModeOption[] = [
   { value: 'safe-run', label: 'Approve safe actions' },
 ];
 
+/**
+ * PCL-P2 — the trigger's own hover hint (Popover, `mode="hover"`), shown
+ * whether or not the menu is open, so the constraint below is visible
+ * without ever clicking anything. This control is never disabled and a click
+ * on it never does nothing — it always updates the label and, the moment a
+ * matching pending call exists or next arrives, whether the agent waits for
+ * you (`shouldAutoApproveRunTool`, consulted fresh every time a call
+ * appears). What it can never do, because `ChatRun.autonomy`
+ * (`server/lib/agent/chat-store.ts`) is resolved once at `send` and frozen
+ * for that run's whole lifetime (`autonomyForCall`, `server/lib/agent/
+ * registry.ts`), is retroactively turn a tool this run already lets the
+ * agent run WITHOUT asking into one that pauses, or the reverse — only a NEW
+ * message (a new run) picks up a changed autonomy. Before this hint existed,
+ * picking either option while nothing this run needed to ask about was
+ * indistinguishable from the control silently doing nothing.
+ */
+export const RUN_MODE_SCOPE_HINT =
+  'Applies to prompts this run still has ahead of it. A tool your workspace already runs automatically — or already refuses — stays that way either way; that is decided per tool before the run starts, and only a new message picks up a change there.';
+
+/** Per-option hint (the menu item's own `title`) — what THIS choice does, one row at a time. */
+export const RUN_MODE_OPTION_HINTS: Record<RunApprovalMode, string> = {
+  ask: 'Pause and ask before every action this run still has to propose.',
+  'safe-run':
+    'Continue through every action this run proposes without asking. You can still deny or switch back.',
+};
+
 export interface RunModeControlState {
   options: readonly RunModeOption[];
   /** Whether Test mode is available to THIS caller. */

@@ -921,6 +921,8 @@ export const startRun = async (
     request_id?: string;
     run_id?: string;
     selection?: { object_type: string; object_id: string };
+    /** PCL-P4: the starter chip key this send's text still traces back to, if any. */
+    starter?: string;
   }
 ): Promise<ProtocolResult> => {
   const at = () => (deps.nowIso ?? (() => new Date().toISOString()))();
@@ -968,6 +970,7 @@ export const startRun = async (
     ...(origin?.request_id ? { origin_request_id: origin.request_id } : {}),
     ...(origin?.run_id ? { origin_run_id: origin.run_id } : {}),
     ...(origin?.selection ? { origin_selection: origin.selection } : {}),
+    ...(origin?.starter ? { origin_starter: origin.starter } : {}),
     ...(focus ? { focus } : {}),
     diagnostics_requested: editorIsOwner && asksForDiagnostics(text),
     engine: 'provider',

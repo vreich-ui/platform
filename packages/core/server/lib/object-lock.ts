@@ -70,6 +70,26 @@ export type ObjectLockRefreshOptions = {
   lockToken?: string;
   leaseSeconds?: number;
   nowMs?: number;
+  /**
+   * Where the extended lease is measured from.
+   *
+   * `'expiry'` (the default) is the article-lock parity behaviour: the new
+   * expiry is `expires_at + lease`, so each call pushes the lock further out
+   * than the last. That is right for a human pressing "keep working", and
+   * WRONG for an automatic heartbeat: a caller ticking every second would
+   * walk the expiry hours into the future, and the lock would outlive the
+   * session that was holding it open (PCL-P1 / C-20).
+   *
+   * `'now'` makes the refresh a SLIDING WINDOW pinned to the clock:
+   * `expires_at = max(now + lease, expires_at)`. However often it is called,
+   * the lock never survives more than `lease` seconds past the last
+   * heartbeat, which is what lets an abandoned card's lock lapse normally.
+   * The `max` is deliberate — a heartbeat may never SHORTEN a lease that a
+   * human explicitly extended further out.
+   */
+  extendFrom?: 'expiry' | 'now';
+  /** Recorded on the history entry so an automatic heartbeat is legible as one in the audit trail. */
+  reason?: string;
 };
 
 export type ObjectLockForceReleaseOptions = {
@@ -243,9 +263,14 @@ export const refreshObjectLock = async (
 
   const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
   // Parity: the article lock extends from the current expiry, not from now.
+  // `extendFrom: 'now'` opts into the bounded sliding window instead (see the
+  // option's doc comment) and can only ever move the expiry later.
+  const heldExpiresAtMs = Date.parse(guard.held.expires_at);
+  const nextExpiresAtMs =
+    options.extendFrom === 'now' ? Math.max(ts + lease * 1000, heldExpiresAtMs) : heldExpiresAtMs + lease * 1000;
   const lock: WorkflowLockRecord = {
     ...guard.held,
-    expires_at: addSecondsIso(Date.parse(guard.held.expires_at), lease),
+    expires_at: nowIso(nextExpiresAtMs),
   };
   const nextRecord: ObjectRecord = {
     ...record,
@@ -257,7 +282,11 @@ export const refreshObjectLock = async (
         at: timestamp,
         action: 'refresh',
         actor: options.actor,
-        details: { owner_id: guard.held.owner_id, lease_seconds: lease },
+        details: {
+          owner_id: guard.held.owner_id,
+          lease_seconds: lease,
+          ...(options.reason ? { reason: options.reason } : {}),
+        },
       },
     ],
     version: record.version + 1,
