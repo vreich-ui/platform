@@ -24,6 +24,7 @@ import { AdminShell } from './AdminShell';
 import { AgentRail, useAgentDock } from './AgentRail';
 import { useChat, type UseChatState } from './chat';
 import { createObjectChat, sendChatMessage } from '@core/lib/admin/chat-client';
+import { chatCreateOrigin } from '@core/lib/admin/chat-origin';
 import { parseFocus, type ObjectSelection } from '@core/lib/admin/object-selection';
 import { WORKSPACE_EXPANDED_MIN_WIDTH } from '@core/lib/admin/responsive-workspace';
 import {
@@ -1415,7 +1416,13 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
           chatId = intent.chatId;
         } else {
           const bound = intent.selection;
-          const created = await createObjectChat(getToken, bound.object_type, bound.object_id, focusedRow?.title);
+          const created = await createObjectChat(
+            getToken,
+            bound.object_type,
+            bound.object_id,
+            focusedRow?.title,
+            chatCreateOrigin()
+          );
           chatId = created.chat.chat_id;
           setChatCache((cache) => rememberDockChat(cache, bound, created.chat.chat_id));
         }

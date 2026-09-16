@@ -71,6 +71,7 @@ import { CandidateStage } from './CandidateStage';
 import { cn } from './utils';
 import { useChat } from './chat';
 import { createObjectChat } from '@core/lib/admin/chat-client';
+import { chatCreateOrigin } from '@core/lib/admin/chat-origin';
 import { candidateAtShortcut, currentCandidateText } from '@core/lib/admin/candidate-choice';
 import { MarginaliaThreadList } from './MarginaliaThreadList';
 import {
@@ -823,7 +824,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
       await Promise.all([
         load(),
         loc.id && typeRef.current
-          ? createObjectChat(getToken, typeRef.current, loc.id)
+          ? createObjectChat(getToken, typeRef.current, loc.id, undefined, chatCreateOrigin())
               .then(({ chat: created }) => setChatId(created.chat_id))
               .catch(() => setChatId(undefined))
           : Promise.resolve(),
