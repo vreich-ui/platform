@@ -16,6 +16,7 @@ import {
   type EditorialView,
 } from '@core/lib/admin/editorial-view-client';
 import { EDITORIAL_STATE_PRESENTATION } from '@core/lib/admin/editorial-state';
+import { releaseAsOfLabel } from '@core/lib/admin/release-presentation';
 import { chatWorkLabel } from '@core/lib/admin/work-summary';
 import { agentStarterHref } from '@core/lib/admin/agent-starters';
 import { governedMediaCountLabel } from '@core/lib/admin/media-counts';
@@ -158,6 +159,7 @@ export default function AdminHome({ identity }: AdminHomeProps) {
   // indicator instead of the blocking skeleton.
   const [refreshing, setRefreshing] = useState(initialView !== null);
   const [error, setError] = useState<string>();
+  const asOfLabel = releaseAsOfLabel(view?.as_of);
 
   /**
    * T5.1 Phase 2 (T0.2 §6.3): ONE request.
@@ -216,6 +218,18 @@ export default function AdminHome({ identity }: AdminHomeProps) {
             <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
               The governed foundation, structure, and editorial collections behind this publication.
             </p>
+            {/* M1: every slot badge below is release-aware — "Published" vs
+                "Live" is decided against the production deploy, which this page
+                now reads from `snapshots/release.json` rather than computing.
+                That blob has an age, so the page says it. */}
+            {asOfLabel ? (
+              <p
+                className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
+                title={view?.as_of}
+              >
+                Release state {asOfLabel}
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <a

@@ -19,6 +19,11 @@
  */
 import { createHash } from 'node:crypto';
 import { getMcpBinding } from './mcp-binding.js';
+import {
+  refreshReleaseSnapshotAfterWrite,
+  RELEASE_ANCESTRY_INTERACTIVE_BUDGET_MS,
+  type ReleaseSnapshotStore,
+} from './release/snapshot-store.js';
 import { getGovernanceBlobStore, getGovernanceDoc } from './governance-store.js';
 import { fnv1aHash, parseBrandImagery, toFiniteNumber, type BrandImageryRecord } from './brand-imagery-derive.js';
 import {
@@ -513,6 +518,37 @@ export const callReleaseToProduction = async (event: LambdaEvent, input: Record<
     if (result.status === 'build_hook_not_configured' || result.status === 'deploy_lookup_not_configured') {
       return toolError(result.reason, { error_code: result.status, ...result });
     }
+    /**
+     * M1 — the release snapshot, refreshed by the release that changed it.
+     *
+     * A FULL refresh (Netlify deploys API + the bounded GitHub ancestry
+     * fan-out), unlike the publish hook's carry-forward: the build hook has
+     * just fired, so the one thing that HAS changed is exactly the thing an
+     * object publish can never change. Without this the dashboard would keep
+     * reading `ready` until the next two-minute pass, which is a long time to
+     * stare at a button you just pressed.
+     *
+     * Under the interactive ancestry budget so it cannot eat the invocation —
+     * S5's whole point is that this call answers the moment the hook has fired
+     * — and best-effort, because the release is already irreversible.
+     */
+    if (result.buildTriggered) {
+      try {
+        const binding = getMcpBinding();
+        const snapshotStore = (await getSiteObjectsBlobStore(event, binding)) as unknown as ReleaseSnapshotStore;
+        await refreshReleaseSnapshotAfterWrite(snapshotStore, {
+          nowMs: Date.now(),
+          source: 'release',
+          budgetMs: RELEASE_ANCESTRY_INTERACTIVE_BUDGET_MS,
+          // Absent binding: `releaseToProduction` above already ran on the
+          // platform env names, so the refresh does too.
+          ...(binding?.env ? { envNames: binding.env } : {}),
+        });
+      } catch (error) {
+        console.warn('release_to_production: release snapshot refresh skipped.', error);
+      }
+    }
+
     if (result.status === 'building') {
       return toolResult(
         buildAsyncReleaseBody({

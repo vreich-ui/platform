@@ -86,7 +86,11 @@ import type { ControlsActionSurface } from './ControlsCard';
 import { objectTypeLabel, idTooltip } from '@core/lib/admin/display-name';
 import { type LibraryRow } from '@core/lib/admin/library-logic';
 import { type EditorialObjectState } from '@core/lib/admin/editorial-state';
-import { fetchReleaseOverview, invalidateReleaseOverview } from '@core/lib/admin/release-client';
+import {
+  fetchReleaseOverview,
+  fetchReleaseOverviewViaShell,
+  invalidateReleaseOverview,
+} from '@core/lib/admin/release-client';
 import { freshCachedInventoryRows, invalidateInventoryCache } from '@core/lib/admin/library-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { relativeTimeFromNow } from './logic';
@@ -453,11 +457,15 @@ function ObjectsPlaneBody({ roles }: { roles: readonly string[] }) {
     let alive = true;
     (async () => {
       try {
-        const [{ fetchInventoryRows }, overview] = await Promise.all([
+        // M2.2: both fetchers ask this navigation's coalesced `admin-shell`
+        // boot first (the same boot the auth gate and the requests pills
+        // already read) and fall back to their dedicated endpoints unchanged
+        // — see `library-client.ts` / `release-client.ts`'s own headers.
+        const [{ fetchInventoryRowsViaShell }, overview] = await Promise.all([
           import('@core/lib/admin/library-client'),
-          fetchReleaseOverview(getToken).catch(() => undefined),
+          fetchReleaseOverviewViaShell(getToken).catch(() => undefined),
         ]);
-        const freshRows = await fetchInventoryRows(getToken);
+        const freshRows = await fetchInventoryRowsViaShell(getToken);
         if (!alive) return;
         setRows(freshRows);
         if (overview) setStates(Object.fromEntries(overview.objects.map((o) => [o.object_id, o.state])));

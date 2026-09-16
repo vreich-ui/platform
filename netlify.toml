@@ -109,6 +109,29 @@
 [functions."editorial-request-sweep"]
   schedule = "*/5 * * * *"
 
+# M0.2: nightly rebuild of the trusted object-inventory index. A warm
+# `object_inventory` read is now TWO blob reads and no listing, which is only
+# safe while every record write goes through `objects/record-writer.ts`. This
+# runs the same verified sweep an untrusted read takes, so a store that drifted
+# by any route this repo cannot police is repaired within the hour. Minute 23 of
+# every hour is clear
+# of the 03:17 membership pass and the 03:41 media compaction pass. A scheduled
+# function only runs if its schedule is DECLARED here (P1: every site carries
+# this block; the parity audit checks it).
+[functions."object-index-rebuild"]
+  schedule = "23 * * * *"
+
+# M1: the release snapshot — snapshots/release.json, refreshed every two
+# minutes. admin-release-state and admin-editorial-view read deploy facts from
+# that one blob instead of calling the Netlify deploys API twice and GitHub
+# /compare once per publish commit on every page view. The write-path hooks
+# (object_publish, release_to_production) cover what people DO; only a schedule
+# sees what happens TO a deploy — a build finishing, a rollback, Auto
+# Publishing unlocking. A scheduled function only runs if its schedule is
+# DECLARED here (P1: every site carries this block; the parity audit checks it).
+[functions."release-snapshot-refresh"]
+  schedule = "*/2 * * * *"
+
 
 [[redirects]]
   from = "/pdf/*"

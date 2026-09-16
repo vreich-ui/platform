@@ -21,11 +21,24 @@
  * (`invalidateInventoryCache`) so a write is never followed by a stale list;
  * `goTrueClient.logout()` also invalidates so the cache never leaks across
  * signed-in users on a shared machine.
+ *
+ * M2.2: `fetchInventoryRowsViaShell` adds one more source ahead of the
+ * network — this navigation's coalesced `admin-shell` boot, which already
+ * carries the `inventory` section for free alongside `access`/`me`/`requests`
+ * (see `admin-shell-client.ts`). A hit primes the SAME cache this file
+ * already keeps, so `ObjectsPlane`, the Cmd-K palette and
+ * `VariantsWorkspace`'s own `fetchVariantMembersViaShell` all read it back
+ * without a second ask; a miss (the section already taken this generation by
+ * another consumer, `error`, `skipped`, or an older deploy) falls back to
+ * `fetchInventoryRows` verbatim — same function, same TTL, nothing about the
+ * network path changes.
  */
 import { callObjectVerb, type GetToken } from '../edit-mode/verbs-client.js';
 import type { LibraryRow } from './library-logic.js';
 import { getSiteIdentity } from '../site-identity.js';
 import { currentPageSignal } from './page-generation.js';
+import { takeAdminShellSection } from './admin-shell-client.js';
+import { invalidateAdminStoreEntry, recordAdminStoreEntry } from './admin-store.js';
 
 export type { GetToken };
 
@@ -113,12 +126,26 @@ async function requestInventory(getToken: GetToken): Promise<LibraryRow[]> {
   return (body.objects as LibraryRow[] | undefined) ?? [];
 }
 
+/**
+ * Warms this module's cache with rows another call site already has —
+ * this navigation's `admin-shell` boot (`fetchInventoryRowsViaShell` below),
+ * or `VariantsWorkspace`'s own `fetchVariantMembersViaShell` — so a LATER
+ * `fetchInventoryRows` call on the same page reads them back for free
+ * instead of also asking the shell (which would find the section already
+ * taken this generation and get `null`) or hitting the network. Exported for
+ * exactly those other call sites; nothing else should call this.
+ */
+export function primeInventoryCache(rows: LibraryRow[], fetchedAt: number = Date.now()): void {
+  const entry: CachedInventory = { rows, fetchedAt };
+  memoryCache = entry;
+  writeSessionCache(entry);
+}
+
 /** Always issues a fresh request, updates both caches, and tracks it as the shared in-flight promise. */
 function runFetch(getToken: GetToken): Promise<LibraryRow[]> {
   const thisFetch = requestInventory(getToken).then((rows) => {
-    const entry: CachedInventory = { rows, fetchedAt: Date.now() };
-    memoryCache = entry;
-    writeSessionCache(entry);
+    primeInventoryCache(rows);
+    recordAdminStoreEntry('inventory', rows, undefined, 'network');
     return rows;
   });
   inflight = thisFetch;
@@ -154,4 +181,24 @@ export function invalidateInventoryCache(): void {
   memoryCache = null;
   inflight = null;
   clearSessionCache();
+  invalidateAdminStoreEntry('inventory');
+}
+
+/**
+ * M2.2 — ask this navigation's coalesced `admin-shell` boot before paying for
+ * a dedicated `admin-object{inventory}` round trip. Same contract as
+ * `fetchAdminAccessStateViaShell` (`admin-shell-client.ts`): a hit is
+ * recorded as `boot` in the shared ledger (`admin-store.ts`) and primes this
+ * module's own cache; a miss falls back to `fetchInventoryRows` unchanged.
+ */
+export async function fetchInventoryRowsViaShell(getToken: GetToken): Promise<LibraryRow[]> {
+  const token = await getToken();
+  const fromShell = await takeAdminShellSection<{ objects?: LibraryRow[]; generated_at?: string }>(token, 'inventory');
+  if (fromShell) {
+    const rows = fromShell.objects ?? [];
+    primeInventoryCache(rows);
+    recordAdminStoreEntry('inventory', rows, fromShell.generated_at, 'boot');
+    return rows;
+  }
+  return fetchInventoryRows(getToken);
 }

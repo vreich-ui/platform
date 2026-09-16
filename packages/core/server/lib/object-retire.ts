@@ -37,7 +37,8 @@
  *   - AN OPEN REVIEW BLOCKS RETIREMENT. A pending human decision is not
  *     something an agent may discard as a side effect; resolve it first.
  */
-import { objectRecordKey, objectStatusIndexKey, OBJECT_STORE_MARKER_VALUE } from './object-store-keys.js';
+import { objectRecordKey } from './object-store-keys.js';
+import { retireObjectRecord, type ObjectRecordWriteStore } from './objects/record-writer.js';
 import { commitMaterializedFiles, ObjectGitCommitError } from './object-git-committer.js';
 import { materialize } from './materialize.js';
 import { isObjectLockActive, sanitizeObjectLock } from './object-lock.js';
@@ -73,9 +74,7 @@ export type RetireObjectDeps = {
   sleep?: (ms: number) => Promise<void>;
 };
 
-export type RetireStore = {
-  get: (key: string) => Promise<string | null>;
-  setJSON: (key: string, value: unknown) => Promise<unknown>;
+export type RetireStore = ObjectRecordWriteStore & {
   delete: (key: string) => Promise<unknown>;
 };
 
@@ -221,16 +220,17 @@ export const retireObject = async (
     ],
     version: record.version + 1,
   };
-  await store.setJSON(key, archived);
+  // M0.1: the record, the status-marker MOVE (archived on, active off) and the
+  // inventory row are one call through the choke point. Naming the transition
+  // is the point — `retireObjectRecord` cannot forget the marker it moved from,
+  // which is what `object-purge.ts` later walks.
+  await retireObjectRecord(store, { record: archived, previous_status: 'active', nowMs: ts });
 
   // Keep the store-backed redirect table in step with the export just committed.
+  // Not a record and not part of the inventory projection, so it stays here.
   if (redirect) {
     await store.setJSON(SITE_REDIRECTS_DOC_KEY, upsertRedirect(deps.existingRedirects ?? [], redirect));
   }
-
-  // Move the status index so inventory and the purge sweep both see it.
-  await store.setJSON(objectStatusIndexKey(input.object_type, 'archived', input.object_id), OBJECT_STORE_MARKER_VALUE);
-  await store.delete(objectStatusIndexKey(input.object_type, 'active', input.object_id));
 
   return {
     status: 200,

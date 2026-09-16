@@ -32,16 +32,21 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import type { ObjectRecord, Principal, WorkflowLockRecord } from '../../schema/object-record-v1.js';
+import { putObjectRecord, type ObjectRecordWriteStore } from './objects/record-writer.js';
+import { isObjectLockActive, sanitizeObjectLock } from './object-lock-view.js';
 
 export const DEFAULT_LEASE_SECONDS = 900; // 15 min, matches the article lock default
 export const MAX_LEASE_SECONDS = 3600;
 
 const leaseSecondsSchema = z.number().int().positive().max(MAX_LEASE_SECONDS).optional();
 
-export type ObjectLockStore = {
-  get(key: string): Promise<string | null>;
-  setJSON(key: string, value: unknown): Promise<unknown>;
-};
+/**
+ * M0.1: the lock verbs write RECORDS, so their store is the choke point's store.
+ * `recordKey` is still taken as a parameter (the callers build it), but it is
+ * now only used to READ — the write derives its own key from the record, which
+ * is what makes the index row and the key impossible to disagree.
+ */
+export type ObjectLockStore = ObjectRecordWriteStore;
 
 export type ObjectLockResult = {
   ok: boolean;
@@ -100,18 +105,14 @@ export type ObjectLockForceReleaseOptions = {
 const nowIso = (ms: number) => new Date(ms).toISOString();
 const addSecondsIso = (fromMs: number, seconds: number) => new Date(fromMs + seconds * 1000).toISOString();
 
-export const isObjectLockActive = (lock: ObjectRecord['lock'], atMs = Date.now()): boolean =>
-  Boolean(lock && Date.parse(lock.expires_at) > atMs);
-
-export const sanitizeObjectLock = (lock: ObjectRecord['lock']) =>
-  lock
-    ? {
-        owner_id: lock.owner_id,
-        owner_label: lock.owner_label,
-        acquired_at: lock.acquired_at,
-        expires_at: lock.expires_at,
-      }
-    : undefined;
+/**
+ * M2.1: the two read-only lock facts moved to the leaf `object-lock-view.ts`
+ * so an inventory row can reach them without reaching this file's writer
+ * (`objects/record-writer.ts`). Re-exported here so every existing importer —
+ * `object-verbs.ts`, `object-publish.ts`, `object-retire.ts` and this file's
+ * own test — keeps the spelling it had.
+ */
+export { isObjectLockActive, sanitizeObjectLock } from './object-lock-view.js';
 
 /**
  * Derives the lock-record owner strings from a principal, mirroring how the
@@ -206,7 +207,7 @@ export const checkoutObjectLock = async (
     version: record.version + 1,
   };
 
-  await store.setJSON(recordKey, nextRecord);
+  await putObjectRecord(store, { record: nextRecord, nowMs: ts });
   return result(200, { action: 'checkout', lockToken: lock.token, lock: sanitizeObjectLock(lock) }, nextRecord);
 };
 
@@ -240,7 +241,7 @@ export const checkinObjectLock = async (
     version: record.version + 1,
   };
 
-  await store.setJSON(recordKey, nextRecord);
+  await putObjectRecord(store, { record: nextRecord, nowMs: ts });
   return result(200, { action: 'checkin', checked_in: true }, nextRecord);
 };
 
@@ -292,7 +293,7 @@ export const refreshObjectLock = async (
     version: record.version + 1,
   };
 
-  await store.setJSON(recordKey, nextRecord);
+  await putObjectRecord(store, { record: nextRecord, nowMs: ts });
   return result(200, { action: 'refresh', lock: sanitizeObjectLock(lock) }, nextRecord);
 };
 
@@ -345,6 +346,6 @@ export const forceReleaseObjectLock = async (
     version: record.version + 1,
   };
 
-  await store.setJSON(recordKey, nextRecord);
+  await putObjectRecord(store, { record: nextRecord, nowMs: ts });
   return result(200, { action: 'force_release', released: true }, nextRecord);
 };

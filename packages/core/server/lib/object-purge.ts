@@ -20,6 +20,7 @@
  * resurrect a 404 for a route readers are still being forwarded from.
  */
 import { objectRecordKey, objectStatusIndexPrefix } from './object-store-keys.js';
+import { deleteObjectRecords, type ObjectRecordRef, type ObjectRecordWriteStore } from './objects/record-writer.js';
 import { collectBlobListItems, type BlobListResponse } from './blob-list.js';
 import { objectTypes, type ObjectRecord, type ObjectType } from '../../schema/object-record-v1.js';
 
@@ -27,8 +28,7 @@ import { objectTypes, type ObjectRecord, type ObjectType } from '../../schema/ob
 export const PURGE_GRACE_DAYS = 30;
 const GRACE_MS = PURGE_GRACE_DAYS * 24 * 60 * 60 * 1000;
 
-export type PurgeStore = {
-  get: (key: string) => Promise<string | null>;
+export type PurgeStore = ObjectRecordWriteStore & {
   delete: (key: string) => Promise<unknown>;
   list: (options: { prefix: string; directories?: boolean; paginate?: boolean }) => Promise<BlobListResponse>;
 };
@@ -77,6 +77,13 @@ export const purgeArchivedObjects = async (
 
   const purged: PurgedEntry[] = [];
   const retained: PurgedEntry[] = [];
+  /**
+   * M0.1: the deletes are COLLECTED and handed to the choke point once, at the
+   * end, rather than issued inline. One arm of the drift alarm and one index
+   * commit for the whole sweep — a per-record commit would rewrite the entire
+   * `objects/index.json` document once per purged object.
+   */
+  const toDelete: ObjectRecordRef[] = [];
 
   for (const objectType of objectTypes) {
     // Walk the archived status index rather than every record: it is exactly the
@@ -95,7 +102,7 @@ export const purgeArchivedObjects = async (
       if (!raw) {
         // Index entry with no record: the record is already gone, so the stale
         // pointer is swept too rather than left to accumulate.
-        if (!dryRun) await store.delete(item.key);
+        if (!dryRun) toDelete.push({ object_type: objectType, object_id: objectId, statuses: ['archived'] });
         continue;
       }
 
@@ -118,13 +125,12 @@ export const purgeArchivedObjects = async (
         continue;
       }
 
-      if (!dryRun) {
-        await store.delete(recordKey);
-        await store.delete(item.key);
-      }
+      if (!dryRun) toDelete.push({ object_type: objectType, object_id: objectId, statuses: ['archived'] });
       purged.push(entry);
     }
   }
+
+  await deleteObjectRecords(store, toDelete, { nowMs: now });
 
   return { purged, retained, dry_run: dryRun, grace_days: graceDays };
 };

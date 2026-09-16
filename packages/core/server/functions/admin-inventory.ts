@@ -30,7 +30,7 @@ import { createHash } from 'node:crypto';
 
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
-import { logDiagnostics, timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
+import { logDiagnostics, timeAuth, timeSection, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { isOwner } from '../lib/roles.js';
 import {
@@ -203,7 +203,17 @@ const openAllowedManagedStore = async (storeName: string, event: LambdaEvent, bi
 
 const searchObjects = async (query: string, context: ActionContext): Promise<InventoryHit[]> => {
   const store = await openObjectStore(context.event, context.binding);
-  const result = await handleObjectVerb(store, { action: 'inventory' }, context.principal);
+  /**
+   * M0 acceptance is stated as a Server-Timing budget (`sec.inventory` under
+   * 400 ms), so the sweep is attributed rather than buried in `work`: on a warm
+   * store this is two blob reads and it should read as such in the Network tab.
+   * A section that starts climbing is the drift alarm going off in production —
+   * something is writing records outside `objects/record-writer.ts` and every
+   * read is paying a verified sweep to repair it.
+   */
+  const result = await timeSection('inventory', () =>
+    handleObjectVerb(store, { action: 'inventory' }, context.principal)
+  );
   if (result.status < 200 || result.status >= 300) return [];
   if ('index' in result.body) logDiagnostics('admin-inventory', result.body.index);
 

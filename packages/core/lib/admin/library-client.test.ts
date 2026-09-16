@@ -8,6 +8,7 @@ import '../../../../sites/drlurie/config/policy-bindings.js';
 import { getSiteIdentity } from '../site-identity.js';
 import {
   fetchInventoryRows,
+  fetchInventoryRowsViaShell,
   freshCachedInventoryRows,
   invalidateInventoryCache,
   peekCachedInventoryRows,
@@ -15,6 +16,9 @@ import {
   type GetToken,
 } from './library-client.js';
 import type { LibraryRow } from './library-logic.js';
+import { getAdminStoreEntry, resetAdminStoreForTests } from './admin-store.js';
+import { resetAdminShellClientForTests } from './admin-shell-client.js';
+import { beginNewPageGeneration, resetPageGenerationForTests } from './page-generation.js';
 
 const getToken: GetToken = async () => 'test-token';
 
@@ -263,5 +267,108 @@ describe('fetchInventoryRows — non-200 behavior (unchanged)', () => {
     restoreFetch = mock.restore;
 
     await assert.rejects(() => fetchInventoryRows(getToken), /Inventory request failed \(500\)/);
+  });
+});
+
+// ─── M2.2: `fetchInventoryRowsViaShell` — the coalesced `admin-shell` boot ──
+const shellBody = (objects: unknown[]) => ({
+  ok: true,
+  status: 200,
+  sections: {
+    access: { status: 'ok', data: { authenticated: true, isAdmin: true } },
+    requests: { status: 'ok', data: { requests: [], total: 0, seq: 1, muted: [], last_notified: {} } },
+    me: { status: 'ok', data: { user: { email: 'owner@example.test' }, roles: ['owner'] } },
+    inventory: { status: 'ok', data: { objects, generated_at: '2026-09-16T00:00:00.000Z', index: {} } },
+    release: { status: 'skipped', code: 'release_source_unavailable' },
+  },
+});
+
+describe('fetchInventoryRowsViaShell', () => {
+  beforeEach(() => {
+    resetAdminShellClientForTests();
+    resetPageGenerationForTests();
+    resetAdminStoreForTests();
+  });
+  afterEach(() => {
+    resetAdminShellClientForTests();
+    resetPageGenerationForTests();
+    resetAdminStoreForTests();
+  });
+
+  it('a shell hit costs exactly one call and primes this module’s own cache', async () => {
+    beginNewPageGeneration();
+    const mock = mockFetch(() => shellBody([row('a')]));
+    restoreFetch = mock.restore;
+
+    const rows = await fetchInventoryRowsViaShell(getToken);
+
+    assert.equal(mock.calls.length, 1);
+    assert.deepEqual(rows, [row('a')]);
+    // Primed: a later plain `fetchInventoryRows` call on the same page reads
+    // it back without a second network request.
+    const again = await fetchInventoryRows(getToken);
+    assert.equal(mock.calls.length, 1, 'the plain call reused the primed cache — no second request');
+    assert.deepEqual(again, [row('a')]);
+  });
+
+  it('records the hit in the shared ledger as `boot`, with the section’s generated_at', async () => {
+    beginNewPageGeneration();
+    const mock = mockFetch(() => shellBody([row('a')]));
+    restoreFetch = mock.restore;
+
+    await fetchInventoryRowsViaShell(getToken);
+
+    const entry = getAdminStoreEntry('inventory');
+    assert.equal(entry?.source, 'boot');
+    assert.equal(entry?.asOf, '2026-09-16T00:00:00.000Z');
+  });
+
+  it('falls back to fetchInventoryRows, unchanged, when the shell has no inventory section', async () => {
+    beginNewPageGeneration();
+    // No `sections` in the body at all — an older deploy, or a 404 — so
+    // `takeAdminShellSection` answers null and this must fall back exactly
+    // as `fetchInventoryRows` always has.
+    const mock = mockFetch(() => ({ objects: [row('a')] }));
+    restoreFetch = mock.restore;
+
+    const rows = await fetchInventoryRowsViaShell(getToken);
+
+    // The failed shell attempt, plus the real fallback inventory call.
+    assert.equal(mock.calls.length, 2);
+    assert.deepEqual(rows, [row('a')]);
+    assert.equal(getAdminStoreEntry('inventory')?.source, 'network');
+  });
+
+  it('falls back when the section is skipped (a signed-in caller with no admin tier)', async () => {
+    beginNewPageGeneration();
+    let call = 0;
+    const mock = mockFetch(() => {
+      call += 1;
+      if (call === 1) {
+        const body = shellBody([row('a')]);
+        body.sections.inventory = { status: 'skipped', code: 'admin_required' } as never;
+        return body;
+      }
+      // The fallback hits the DEDICATED `admin-object` endpoint, a different shape.
+      return { objects: [row('a')] };
+    });
+    restoreFetch = mock.restore;
+
+    const rows = await fetchInventoryRowsViaShell(getToken);
+
+    assert.equal(mock.calls.length, 2, 'the skipped section falls back to the dedicated endpoint');
+    assert.deepEqual(rows, [row('a')]);
+  });
+
+  it('a mutation invalidates the ledger entry a boot hit wrote, same as a network one', async () => {
+    beginNewPageGeneration();
+    const mock = mockFetch(() => shellBody([row('a')]));
+    restoreFetch = mock.restore;
+
+    await fetchInventoryRowsViaShell(getToken);
+    assert.notEqual(getAdminStoreEntry('inventory'), undefined);
+
+    invalidateInventoryCache();
+    assert.equal(getAdminStoreEntry('inventory'), undefined);
   });
 });

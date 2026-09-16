@@ -73,6 +73,8 @@ export interface EditorialView {
     production_confirmed: boolean;
     live_commit: string | null;
   };
+  /** M1: when the deploy facts above were gathered. Absent on a pre-M1 function deploy. */
+  as_of?: string;
 }
 
 /** Short: the map is a landing surface, and an editor who publishes elsewhere should see it here. */

@@ -10,7 +10,7 @@
  * whose current revision is ahead of its receipt has changes the live site
  * has not seen.
  */
-import { isObjectLockActive, sanitizeObjectLock } from './object-lock.js';
+import { isObjectLockActive, sanitizeObjectLock } from './object-lock-view.js';
 import {
   activeApprovalPolicy,
   isGovernedObjectType,
@@ -19,7 +19,7 @@ import {
 } from '../../lib/approval-policy.js';
 import type { ObjectRecord } from '../../schema/object-record-v1.js';
 import { objectDisplayName } from '../../lib/admin/display-name.js';
-import { effectiveApproval, type EffectiveApproval } from './review-state.js';
+import { effectiveApproval, type EffectiveApproval } from './review-approval.js';
 
 export type InventoryReviewState = 'none' | 'open' | 'changes_requested' | 'approved';
 export type InventoryApprovalState = EffectiveApproval['state'];

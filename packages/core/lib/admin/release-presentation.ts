@@ -94,3 +94,52 @@ export const releaseQueueSignature = (items: ReleaseReviewItem[]): string =>
     .map((item) => `${item.object_id}:${item.display_name}`)
     .sort()
     .join('|');
+
+/**
+ * M1 — "as of hh:mm".
+ *
+ * `admin-release-state` and `admin-editorial-view` no longer compute the deploy
+ * header on the page path; they read it from `snapshots/release.json`, which a
+ * scheduled function refreshes every two minutes and the publish/release write
+ * paths refresh immediately. That is a straight trade of freshness for latency
+ * (14-16 s of Netlify and GitHub calls per page view, gone), and the honest way
+ * to make that trade is to SAY how old the number is rather than let a reader
+ * assume "now".
+ *
+ * Local time on purpose: the reader is a person deciding whether to press
+ * Release, and "as of 14:32" answers "is this from before or after I published"
+ * in their own clock. Seconds are noise at a two-minute cadence.
+ *
+ * `undefined` for an absent or unparseable stamp — the caller renders nothing
+ * rather than "as of Invalid Date". A missing `as_of` is what an older function
+ * deploy answers during a rollout, so this must degrade quietly.
+ */
+export const releaseAsOfLabel = (
+  asOf: string | null | undefined,
+  options: { locale?: string; timeZone?: string } = {}
+): string | undefined => {
+  if (!asOf) return undefined;
+  const at = new Date(asOf);
+  if (Number.isNaN(at.getTime())) return undefined;
+  const formatted = at.toLocaleTimeString(options.locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(options.timeZone ? { timeZone: options.timeZone } : {}),
+  });
+  return `as of ${formatted}`;
+};
+
+/**
+ * How stale is too stale to show without comment. The refresh runs every two
+ * minutes; three missed passes is the same bound the server uses to decide a
+ * snapshot must be rebuilt (`RELEASE_SNAPSHOT_MAX_AGE_MS`). Past it, the label
+ * says so — a server that is rebuilding on every read is a broken schedule, and
+ * the person looking at the badge is the one who will notice first.
+ */
+export const RELEASE_AS_OF_STALE_MS = 10 * 60_000;
+
+export const releaseAsOfIsStale = (asOf: string | null | undefined, nowMs: number): boolean => {
+  if (!asOf) return false;
+  const at = Date.parse(asOf);
+  return Number.isFinite(at) && nowMs - at > RELEASE_AS_OF_STALE_MS;
+};

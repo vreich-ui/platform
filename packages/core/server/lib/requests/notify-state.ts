@@ -159,18 +159,29 @@ const mergeBounded = (
   return Object.fromEntries(entries.slice(Math.max(0, entries.length - LAST_NOTIFIED_MAX)));
 };
 
-const loadLedger = async (
-  store: EditorialRequestStore,
-  key: string,
+/**
+ * A ledger blob's entries, or the pre-split settings doc's legacy map when
+ * there is no ledger. Split from the read (`loadLedger`) so `loadRequestInbox`
+ * can issue the ledger read WITHOUT first awaiting the settings doc it may
+ * fall back to — the fallback depends on the ledger's answer, never on
+ * whether to ask for it.
+ */
+const parseLedger = (
+  raw: string | null | undefined,
   legacy: Readonly<Record<string, string>> | undefined
-): Promise<Record<string, string>> => {
-  const raw = await store.get(key);
+): Record<string, string> => {
   if (!raw) return { ...(legacy ?? {}) };
   const parsed = notifyLedgerSchema.safeParse(JSON.parse(raw));
   // An unparseable ledger is treated as EMPTY, not as fatal: the cost is one
   // repeated notification, and refusing to load it would stop the sweep.
   return parsed.success ? parsed.data.entries : { ...(legacy ?? {}) };
 };
+
+const loadLedger = async (
+  store: EditorialRequestStore,
+  key: string,
+  legacy: Readonly<Record<string, string>> | undefined
+): Promise<Record<string, string>> => parseLedger(await store.get(key), legacy);
 
 const saveLedger = async (
   store: EditorialRequestStore,
@@ -189,6 +200,60 @@ const saveLedger = async (
     })
   );
   return entries;
+};
+
+/**
+ * M2.1 — the person's whole inbox state, in ONE round trip.
+ *
+ * ## What this replaces
+ *
+ * `buildRequestsListBody` closed with `await loadNotifyState(...)` and then
+ * `await loadSeenLedger(..., notify)`, which is two blob reads IN SERIES on
+ * the busiest read path in the admin. They were serial for one reason only:
+ * `loadSeenLedger` takes the settings doc so that a person whose ledger
+ * predates the W19 split still dedupes off the settings doc's legacy
+ * `last_notified` map. That fallback needs the settings doc only when the
+ * LEDGER IS ABSENT — it never decides whether to issue the ledger read — so
+ * the dependency is on the RESULT, not on the request, and the two reads can
+ * be issued together and joined afterwards.
+ *
+ * ## Why this is not the merged `users/<id>/inbox.json` the M2.1 task asked for
+ *
+ * REFUSED, with the reason. The task's premise was that this store "has
+ * exactly one writer module by design", so folding `notify/` and
+ * `notify-seen/` into one document would be safe. `store.ts`'s own header (at
+ * `notifyStateKey`) says the opposite, names this exact pair, and names the
+ * bug: the split is by writing COMPONENT, not by module, because Netlify
+ * Blobs has no compare-and-swap —
+ *
+ *   "A person clicking Mute while their other tab acked a transition could
+ *    have the mute silently reverted."
+ *
+ * Settings are written by an explicit click; the seen ledger is written by
+ * EVERY OPEN TAB's delivery ack. Those are two components by the only
+ * definition that matters here (two concurrent load-modify-write windows on
+ * one key), and merging the documents re-creates a data-loss race that W19
+ * removed by construction. `index-store.ts`'s header leans on the same law
+ * from the other side: the object store could not have a writer-maintained
+ * index precisely because "an index maintained by writers is only as correct
+ * as the least careful writer".
+ *
+ * The performance the merge was asked for is bought here instead, and in
+ * full: the requests surface went from THREE SERIAL reads (index -> notify ->
+ * seen, ~440 ms) to ONE PARALLEL STAGE — the index read joins these two in
+ * `buildRequestsListBody`'s `Promise.all`, so the wall cost is one blob read,
+ * which is BETTER than the two-parallel target, and it costs no correctness.
+ * The one thing the merge would have bought over this is a single concurrent
+ * connection instead of two, worth ~0 ms against a race worth a lost mute.
+ */
+export const loadRequestInbox = async (
+  store: EditorialRequestStore,
+  email: string
+): Promise<{ notify: NotifyState | undefined; seen: Record<string, string> }> => {
+  const person = personKey(email);
+  // THE two reads. Issued together; joined below.
+  const [notify, seenRaw] = await Promise.all([loadNotifyState(store, email), store.get(notifySeenKey(person))]);
+  return { notify, seen: parseLedger(seenRaw, notify?.last_notified) };
 };
 
 /** What the BROWSER has already shown this person. Falls back to a pre-split doc. */

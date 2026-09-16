@@ -62,6 +62,8 @@ import {
 } from './object-git-committer.js';
 import { isObjectLockActive, sanitizeObjectLock, type ObjectLockStore } from './object-lock.js';
 import { objectRecordKey } from './object-store-keys.js';
+import { putObjectRecord } from './objects/record-writer.js';
+import { refreshReleaseSnapshotAfterWrite, type ReleaseSnapshotStore } from './release/snapshot-store.js';
 import { summarizeValidation, validateObject, type ObjectValidationContext } from './object-validate.js';
 import type {
   ObjectRecord,
@@ -93,7 +95,13 @@ const DIMS_PUSH_WALL_CLOCK_MS = 3_000;
 const withDeferredDeployMarker = (message: string): string =>
   message.includes(NETLIFY_SKIP_MARKER) ? message : `${message} ${NETLIFY_SKIP_MARKER}`;
 
-export type ObjectPublishStore = ObjectLockStore;
+/**
+ * M1: `list` is optional and present on the real site-objects store. The
+ * post-stamp release-snapshot refresh reads the inventory, whose repair path
+ * needs a listing; a store without one simply leaves the snapshot to the
+ * schedule (the refresh is best-effort and swallows its own failures).
+ */
+export type ObjectPublishStore = ObjectLockStore & Partial<Pick<ReleaseSnapshotStore, 'list'>>;
 
 export type PublishObjectInput = {
   object_type: ObjectType;
@@ -398,7 +406,10 @@ export const publishObject = async (
   };
 
   try {
-    await store.setJSON(key, stamped);
+    // M0.1: the stamp goes through the record-write choke point, so the
+    // inventory row that says "published" is written by the same call that
+    // makes it true (`objects/record-writer.ts`).
+    await putObjectRecord(store, { record: stamped, nowMs: ts });
   } catch (error) {
     return err(500, 'stamp_failed_export_committed', {
       error:
@@ -409,6 +420,30 @@ export const publishObject = async (
       reconciliation: 'retry_publish',
     });
   }
+
+  /**
+   * M1 — the release snapshot, refreshed by the write that changed it.
+   *
+   * AFTER the stamp and before anything optional, because this is what makes
+   * `admin-release-state` truthful about an editor's own publish without the
+   * client having to guess: `snapshots/release.json` is the blob that surface
+   * reads, and the object this call just published is now `published` in it.
+   *
+   * `carryDeploy` — no Netlify call, no GitHub call. An object export commits
+   * DARK (`[skip netlify]`, see this file's header), so a publish changes which
+   * objects are published and cannot change which deploy is live. The deploy
+   * facts are carried from the previous snapshot; the `release-snapshot-refresh`
+   * schedule owns them. Cost here is the trusted inventory (two blob reads) plus
+   * one write.
+   *
+   * Best-effort: the publish is committed and stamped, and nothing below may
+   * change that. `refreshReleaseSnapshotAfterWrite` never throws.
+   */
+  await refreshReleaseSnapshotAfterWrite(store as ReleaseSnapshotStore, {
+    nowMs: ts,
+    source: 'publish',
+    carryDeploy: true,
+  });
 
   // ── KI-08: the annotation layer reaches the SINK, from the STORE ─────────
   // AFTER the stamp, deliberately. The export this publish just committed is

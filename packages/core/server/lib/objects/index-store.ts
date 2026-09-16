@@ -51,125 +51,102 @@
  * entry stores the RAW `record.lock` and both fields are re-derived on every
  * read from the caller's `atMs` and policy. Everything else in the row is a
  * pure function of the record and is safe to cache against its etag.
+ *
+ * ## M0.2 — the index became TRUSTED, and what had to be true first
+ *
+ * Everything above is still the REPAIR path. What changed in M0 is that it is
+ * no longer the ONLY path: `readInventoryRows` first tries to serve the whole
+ * inventory from two blob reads and no `list()` at all.
+ *
+ * The objection the header opens with — "an index maintained by writers is
+ * only as correct as the least careful writer" — was answered by removing the
+ * writers, not by trusting them. M0.1 put every site-objects record write
+ * behind ONE choke point (`objects/record-writer.ts`), and
+ * `tests/netlify/object-inventory-index.test.ts` fails the build if a
+ * `.set`/`.setJSON` against a record key appears anywhere else. The five (in
+ * fact six) writer modules the paragraph above names are now callers of that
+ * one function.
+ *
+ * That still leaves three ways an index could go stale, and each has an
+ * answer rather than a hope:
+ *
+ *  1. **An interrupted write.** `objects/version` is a two-field doc whose
+ *     `seq` is the drift ALARM. The choke point ARMS it — writes
+ *     `seq = index.seq + 1` — BEFORE it touches the record, and the index
+ *     write that follows is what disarms it (the index is written carrying
+ *     that same `seq`). `readInventoryRows` trusts the index only while
+ *     `version.seq === index.seq`. So a crash anywhere between arming and the
+ *     index write leaves `version.seq > index.seq`, and the next read falls
+ *     into the verified sweep below and repairs both docs. This is the one
+ *     place the M0 task description was inverted deliberately: the task said
+ *     to stamp the version LAST, which detects a lost INDEX write but not a
+ *     crash between the record write and the index write — the window in
+ *     which a record exists that the index does not mention. Arming first
+ *     detects every interruption, at the cost of one spurious rebuild when
+ *     the interruption happened before the record was written at all.
+ *  2. **Two overlapping writes.** Netlify Blobs has no transaction but it
+ *     does have compare-and-swap (`onlyIfMatch`), so BOTH the arm and the
+ *     index write are conditional on the etag the writer read. The loser of a
+ *     race does not retry and does not write a row: it stamps
+ *     `objects/version.armed = true` and leaves, and the next read rebuilds.
+ *     (REVIEW 2026-09-16 — that sentence used to end at "leaves the alarm
+ *     armed" and was not true; `index-doc.ts`'s schema note states what it
+ *     took to make it true and why `seq` alone could not.) A store that cannot
+ *     report an etag for either doc (the local file-backed shim, and every
+ *     hand-rolled test fake) never disarms the alarm at all — which degrades
+ *     to exactly the verified sweep this module shipped with, the same way an
+ *     etag-less LISTING already degrades it.
+ *  3. **A writer that bypasses the choke point.** Nothing at read time can
+ *     see that. Two things outside this module answer it: the writer-pinning
+ *     test, and `functions/object-index-rebuild.ts` — a nightly scheduled
+ *     full verified sweep per tenant, which is the same self-healing code
+ *     path an ordinary read takes, run when nobody is looking.
+ *
+ * Cost, warm and unchanged: `2 BR` (`objects/index.json` + `objects/version`,
+ * read in PARALLEL) and no listing. Cold, or after any of the three cases
+ * above: the verified sweep, `13 BL + 1 BR + n BR + 2 BW`.
+ *
+ * The version doc is NOT a schema bump for the index. A store deployed before
+ * M0 has no `objects/version` blob at all, so the very first read finds no
+ * version, cannot trust, sweeps, and writes both docs. The entry shape did not
+ * change, so `object-inventory-index.v2` still describes it and no fleet-wide
+ * rebuild is forced.
  */
-import { z } from 'zod';
-
 import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY, type BlobListItem } from '../blob-list.js';
-import { inventoryLockState, inventoryRowFromRecord, type InventoryRow } from '../object-inventory.js';
+import { inventoryLockState, type InventoryRow } from '../object-inventory.js';
 import {
   activeApprovalPolicy,
   isGovernedObjectType,
   publishRequiresApproval,
   type ApprovalPolicy,
 } from '../../../lib/approval-policy.js';
+import { inventoryRowFromRecord } from '../object-inventory.js';
 import { objectTypes, type ObjectRecord, type ObjectType } from '../../../schema/object-record-v1.js';
+import {
+  emptyIndex,
+  persistIndex,
+  projectIndexEntry,
+  readObjectIndex,
+  readObjectStoreVersion,
+  usableEtag,
+  writeObjectStoreVersion,
+  type ObjectIndex,
+  type ObjectIndexDocStore,
+  type ObjectIndexEntry,
+  type ObjectStoreVersion,
+} from './index-doc.js';
 
 /**
- * ## The version, and why a bump is a hard break
- *
- * `v2` (W4.1): the ROW shape grew a `content` summary on `content_item` rows
- * (`object-inventory.ts`), so `/admin/variants` groups a family from the
- * listing instead of reading every record. A `v1` entry's `row` would still
- * PARSE — `row` is deliberately loose — and would then serve a row with no
- * `content` key, indistinguishable from an article that declares no parent.
- *
- * So the version is a `z.literal` in `objectIndexSchema` and `loadObjectIndex`
- * answers `undefined` for anything else: a `v1` blob is detected on the first
- * read after deploy and rebuilt in place by the same read-repair path that
- * already handles a corrupt or absent index. No script, no per-tenant
- * remediation. It costs one sweep, once, on one request per site, and
- * `stats.rebuilt` reports it (the idiom `requests/list-snapshot.ts` uses).
- *
- * The tolerant alternative is what `requests/store.ts` chose for
- * `object_published`, and its comment says why it could: that field's absence
- * has one honest reading (`false`). A missing `content` summary has none, so
- * tolerance would ship wrong variant families until something touched each
- * record.
+ * The document layer is re-exported wholesale so that every existing importer
+ * of `index-store.js` keeps its import: the split is a bundle boundary, not a
+ * new public surface.
  */
-export const OBJECT_INDEX_SCHEMA_VERSION = 'object-inventory-index.v2';
-export const OBJECT_INDEX_KEY = 'objects/index.json';
+export * from './index-doc.js';
 
-/**
- * The row as STORED. `lock` and `requires_approval` are stripped from the
- * cached projection because they are re-derived per read (see the header); the
- * raw lease is kept so `lock` can be re-derived at any `atMs`.
- */
-const indexEntrySchema = z.object({
-  /** The record's blob key — the identity `store.list()` reports. */
-  key: z.string(),
-  /** The etag `list()` reported when `row` was projected. Never trusted when empty. */
-  etag: z.string(),
-  /**
-   * `InventoryRow` minus the two re-derived fields. Kept as a loose record on
-   * purpose: this is a cache, and a future row-shape change must degrade to a
-   * re-read, never to a parse failure that breaks the library.
-   */
-  row: z.record(z.string(), z.unknown()),
-  /** Raw `record.lock`, absent when the record held none. */
-  lock: z.unknown().optional(),
-});
-export type ObjectIndexEntry = z.infer<typeof indexEntrySchema>;
-
-export const objectIndexSchema = z.object({
-  schema_version: z.literal(OBJECT_INDEX_SCHEMA_VERSION),
-  /** Monotonic write counter, bumped by every index write including repairs. */
-  seq: z.number().int().nonnegative(),
-  updated_at: z.string(),
-  entries: z.array(indexEntrySchema),
-});
-export type ObjectIndex = z.infer<typeof objectIndexSchema>;
-
-/** The minimal store shape this module needs; `ObjectVerbStore` satisfies it. */
-export interface ObjectIndexStore {
-  get(key: string): Promise<string | null>;
-  setJSON(key: string, value: unknown): Promise<unknown>;
+/** What the SWEEP needs on top of the document store: the listings that name the live key set. `ObjectVerbStore` satisfies it. */
+export interface ObjectIndexStore extends ObjectIndexDocStore {
   list(options: { prefix: string; directories?: boolean; paginate?: boolean }): Promise<unknown>;
 }
-
-/** An etag is usable only when the store actually reported one (`local-blobs.ts` reports `''`). */
-const usableEtag = (etag: string | undefined): etag is string => typeof etag === 'string' && etag.length > 0;
-
-/**
- * The index, plus WHY it is missing when it is. `superseded` means a blob was
- * there and could not be used — unparseable, or a schema version this build no
- * longer reads. That is a REBUILD; an absent key is merely a cold store.
- */
-const readObjectIndex = async (
-  store: ObjectIndexStore
-): Promise<{ index: ObjectIndex | undefined; superseded: boolean }> => {
-  let raw: string | null;
-  try {
-    raw = await store.get(OBJECT_INDEX_KEY);
-  } catch {
-    return { index: undefined, superseded: false };
-  }
-  if (!raw) return { index: undefined, superseded: false };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { index: undefined, superseded: true };
-  }
-  const result = objectIndexSchema.safeParse(parsed);
-  return result.success ? { index: result.data, superseded: false } : { index: undefined, superseded: true };
-};
-
-/** `undefined` when absent, unreadable, unparseable, or written by a different schema version — the caller then rebuilds. */
-export const loadObjectIndex = async (store: ObjectIndexStore): Promise<ObjectIndex | undefined> =>
-  (await readObjectIndex(store)).index;
-
-/** The one place an entry is derived from a record, so a cached row can never drift from the live projection's shape. */
-export const projectIndexEntry = (key: string, etag: string, record: ObjectRecord, atMs: number): ObjectIndexEntry => {
-  // `atMs` reaches only the two fields stripped below; every retained field is
-  // a pure function of the record.
-  const { lock: _lock, requires_approval: _requiresApproval, ...rest } = inventoryRowFromRecord(record, atMs);
-  return {
-    key,
-    etag,
-    row: rest as unknown as Record<string, unknown>,
-    ...(record.lock ? { lock: record.lock } : {}),
-  };
-};
 
 /** Re-attach the two per-read fields to a stored projection. */
 const rowFromEntry = (entry: ObjectIndexEntry, atMs: number, policy: ApprovalPolicy): InventoryRow => {
@@ -199,6 +176,13 @@ export type InventorySweepResult = {
     wrote: boolean;
     /** True when a stored index was found and DISCARDED (old schema version, or unparseable) and rebuilt from records. A cold store is not a rebuild. */
     rebuilt: boolean;
+    /**
+     * M0.2 — true when the whole answer came from `objects/index.json` +
+     * `objects/version` and NOTHING was listed. This is the metric the M0
+     * acceptance is stated in: a warm, unchanged store must report
+     * `trusted: true`, `listed === cached`, `read: 0`, `wrote: false`.
+     */
+    trusted: boolean;
   };
 };
 
@@ -213,7 +197,18 @@ export type InventorySweepResult = {
  */
 export const sweepInventoryRows = async (
   store: ObjectIndexStore,
-  options: { nowMs: number; approvalPolicy?: ApprovalPolicy; objectType?: ObjectType }
+  options: {
+    nowMs: number;
+    approvalPolicy?: ApprovalPolicy;
+    objectType?: ObjectType;
+    /**
+     * The two projection docs, when the caller has already read them.
+     * `readInventoryRows` always has — it read them to decide whether it could
+     * trust them — and re-reading would make the repair path cost two blob
+     * reads more than the path it replaced.
+     */
+    preread?: { index: ObjectIndex | undefined; superseded: boolean; version: ObjectStoreVersion | undefined };
+  }
 ): Promise<InventorySweepResult> => {
   const policy = options.approvalPolicy ?? activeApprovalPolicy();
   const types: readonly ObjectType[] = options.objectType ? [options.objectType] : objectTypes;
@@ -239,7 +234,10 @@ export const sweepInventoryRows = async (
   );
   const items = perTypeItems.flat();
 
-  const { index, superseded } = await readObjectIndex(store);
+  const { index, superseded, version } = options.preread ?? {
+    ...(await readObjectIndex(store)),
+    version: await readObjectStoreVersion(store),
+  };
   const byKey = new Map<string, ObjectIndexEntry>((index?.entries ?? []).map((entry) => [entry.key, entry]));
 
   const stale: BlobListItem[] = [];
@@ -289,6 +287,8 @@ export const sweepInventoryRows = async (
     : await writeIndexIfChanged(store, index, nextEntries, {
         partial: Boolean(options.objectType),
         listedKeys: new Set(items.map((item) => item.key)),
+        version,
+        nowMs: options.nowMs,
       });
 
   return {
@@ -299,53 +299,164 @@ export const sweepInventoryRows = async (
       read: stale.length,
       wrote,
       rebuilt: superseded,
+      trusted: false,
     },
   };
 };
 
 /**
- * Persist the projection, but only when it would actually change — so a steady
- * state where nothing was edited costs zero writes. A partial sweep (one
- * `objectType`) must never truncate the index to that type, so it keeps every
- * entry outside the keys it listed.
+ * Persist the projection, and — on a FULL sweep — put the drift alarm back in
+ * step with it, which is what makes the next read a two-blob read.
  *
- * Concurrency: last write wins, which is safe here for the same reason it is
- * safe in `requests/store.ts` — this is a regenerable projection, so a lost
- * write costs the next reader one extra sweep and nothing else. The same
- * reasoning covers a PARTIAL sweep that is the first read after a schema bump:
- * `existing` is undefined, so it writes only its own type and the other types'
- * entries are gone. Nothing stale is ever served — every row in that response
- * was read live — and the next full sweep re-projects the rest.
+ * A steady state where nothing was edited AND the alarm already agrees costs
+ * zero writes. A partial sweep (one `objectType`) must never truncate the
+ * index to that type, so it keeps every entry outside the keys it listed.
+ *
+ * ## Why a PARTIAL sweep may never disarm the alarm (M0.2)
+ *
+ * A partial sweep verified ONE type against the live listing and carried every
+ * other type's entries over untouched. Before M0 that was harmless: the index
+ * was re-verified on every read. Now `version.seq === index.seq` is a promise
+ * that the WHOLE index is current, and a partial sweep cannot make that
+ * promise — the armed alarm it would be disarming may well have been armed by
+ * an interrupted write to one of the types it did not look at. So a partial
+ * sweep refreshes CONTENT at the existing `seq` and leaves the alarm exactly
+ * as it found it; the next full read repairs and re-trusts.
+ *
+ * Concurrency: last write wins here, which is still safe, because a sweep
+ * writes a COMPLETE projection it verified against the listing rather than a
+ * read-modify-write of somebody else's state. The loss it can suffer is a
+ * sweep landing after a choke-point write and reverting that row — and that
+ * cannot be served as current, because the sweep stamps the `seq` it read
+ * BEFORE listing while the writer moved the alarm past it. Mismatch, rebuild.
+ * (The CHOKE POINT's index write is the read-modify-write, and that one is
+ * compare-and-swapped — see `commitObjectIndexEntries`.)
  */
 const writeIndexIfChanged = async (
-  store: ObjectIndexStore,
+  store: ObjectIndexDocStore,
   existing: ObjectIndex | undefined,
   sweptEntries: readonly ObjectIndexEntry[],
-  scope: { partial: boolean; listedKeys: Set<string> }
+  scope: {
+    partial: boolean;
+    listedKeys: Set<string>;
+    version: ObjectStoreVersion | undefined;
+    nowMs: number;
+  }
 ): Promise<boolean> => {
   const merged = scope.partial
     ? [...(existing?.entries ?? []).filter((entry) => !scope.listedKeys.has(entry.key)), ...sweptEntries]
     : [...sweptEntries];
   merged.sort((a, b) => a.key.localeCompare(b.key));
 
-  const before = (existing?.entries ?? []).map((entry) => `${entry.key} ${entry.etag}`).sort();
-  const after = merged.map((entry) => `${entry.key} ${entry.etag}`).sort();
-  if (existing && before.length === after.length && before.every((value, i) => value === after[i])) return false;
-  if (!existing && merged.length === 0) return false;
+  const before = (existing?.entries ?? []).map((entry) => `${entry.key}\u0000${entry.etag}`).sort();
+  const after = merged.map((entry) => `${entry.key}\u0000${entry.etag}`).sort();
+  const sameEntries = Boolean(existing) && before.length === after.length && before.every((v, i) => v === after[i]);
 
-  const index: ObjectIndex = {
-    schema_version: OBJECT_INDEX_SCHEMA_VERSION,
-    seq: (existing?.seq ?? 0) + 1,
-    updated_at: new Date().toISOString(),
-    entries: merged,
-  };
-  try {
-    await store.setJSON(OBJECT_INDEX_KEY, objectIndexSchema.parse(index));
-    return true;
-  } catch (error) {
-    // The index is a cache. Failing to persist it costs the next call a full
-    // sweep; it must never fail the call that noticed.
-    console.warn('inventory: could not persist objects/index.json.', error);
-    return false;
+  // A partial sweep only ever refreshes content, at the seq it found.
+  if (scope.partial) {
+    if (sameEntries) return false;
+    return persistIndex(store, { ...(existing ?? emptyIndex()), entries: merged }, scope.nowMs);
   }
+
+  // A full sweep must leave the pair AGREEING, so the next read is two blobs.
+  // Nothing to do only when the entries already match AND the alarm is down.
+  const alarmDown =
+    Boolean(existing) && scope.version?.seq === existing?.seq && scope.version?.armed !== true;
+  if (sameEntries && alarmDown) return false;
+  if (!existing && merged.length === 0 && !scope.version) {
+    // A genuinely empty, never-written store still deserves the pair: without
+    // it every read of an empty site pays 13 listings forever.
+    const seq = 1;
+    const wroteEmpty = await persistIndex(store, { ...emptyIndex(), seq, entries: [] }, scope.nowMs);
+    if (wroteEmpty) await writeObjectStoreVersion(store, seq, new Date(scope.nowMs).toISOString()).catch(() => undefined);
+    return wroteEmpty;
+  }
+
+  const seq = Math.max(existing?.seq ?? 0, scope.version?.seq ?? 0) + 1;
+  const wrote = await persistIndex(store, { ...emptyIndex(), seq, entries: merged }, scope.nowMs);
+  if (!wrote) return false;
+  // Index FIRST, alarm second: a crash between them leaves `version.seq` BELOW
+  // `index.seq`, which is a mismatch, which is another rebuild. The opposite
+  // order would leave them equal with the index half-written.
+  try {
+    await writeObjectStoreVersion(store, seq, new Date(scope.nowMs).toISOString());
+  } catch (error) {
+    console.warn('inventory: could not persist objects/version.', error);
+  }
+  return true;
 };
+
+
+
+// ═══ M0.2 — the trusted read ═══════════════════════════════════════════════
+
+/**
+ * Two blob reads, in parallel, and no listing. `undefined` means "not
+ * trustworthy, sweep instead" and is the answer for every doubt there is: no
+ * index, no alarm doc, an alarm that disagrees with the index, a corrupt or
+ * superseded index.
+ *
+ * `objectType` narrows the ANSWER, not the evidence: the whole index was
+ * vouched for by one `seq` comparison, so serving one type out of it is a
+ * filter, not a second decision.
+ */
+const readTrustedInventory = (
+  options: { nowMs: number; approvalPolicy?: ApprovalPolicy; objectType?: ObjectType },
+  read: { index: ObjectIndex | undefined; version: ObjectStoreVersion | undefined }
+): InventorySweepResult | undefined => {
+  const { index, version } = read;
+  if (!index || !version) return undefined;
+  if (version.seq !== index.seq) return undefined;
+  /**
+   * REVIEW — the second term of the trust predicate. `seq` alone could be put
+   * back in step by a writer that never committed its row (see
+   * `index-doc.ts`'s schema note); `armed` is the sticky flag such a writer
+   * leaves behind, and only a full verified sweep clears it.
+   */
+  if (version.armed === true) return undefined;
+
+  const policy = options.approvalPolicy ?? activeApprovalPolicy();
+  const entries = options.objectType
+    ? index.entries.filter((entry) => entry.row.object_type === options.objectType)
+    : index.entries;
+
+  return {
+    // `lock` and `requires_approval` are re-derived HERE, per read, from the
+    // caller's `atMs` and the active policy — see the header. A lease expires
+    // with nothing written, so serving a cached `held: true` would be a silent
+    // correctness bug, trusted index or not.
+    rows: entries.map((entry) => rowFromEntry(entry, options.nowMs, policy)),
+    stats: {
+      listed: entries.length,
+      cached: entries.length,
+      read: 0,
+      wrote: false,
+      rebuilt: false,
+      trusted: true,
+    },
+  };
+};
+
+/**
+ * The inventory read path. Tries the trusted index first (2 blob reads, no
+ * listing); falls through to the verified sweep, which is also the repair.
+ *
+ * Every caller that wants inventory rows should use THIS, not
+ * `sweepInventoryRows` — the sweep is the repair path and the nightly job.
+ */
+export const readInventoryRows = async (
+  store: ObjectIndexStore,
+  options: { nowMs: number; approvalPolicy?: ApprovalPolicy; objectType?: ObjectType }
+): Promise<InventorySweepResult> => {
+  // THE two reads. In parallel, because neither answers a question the other
+  // asked: together they are the whole warm-path cost.
+  const [indexRead, version] = await Promise.all([readObjectIndex(store), readObjectStoreVersion(store)]);
+  const trusted = readTrustedInventory(options, { index: indexRead.index, version });
+  if (trusted) return trusted;
+  // The repair path inherits what was just read rather than reading it again.
+  return sweepInventoryRows(store, {
+    ...options,
+    preread: { index: indexRead.index, superseded: indexRead.superseded, version },
+  });
+};
+

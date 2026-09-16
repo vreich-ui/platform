@@ -9,43 +9,20 @@
  * so neither side has to reach into the other's module.
  */
 import { SEVERITY, type AdminSeverity } from './severity.js';
+import type { RequestRowLike, RequestStatusName } from './request-list-order.js';
 
-export type RequestStatusName =
-  | 'queued'
-  | 'running'
-  | 'needs_you'
-  | 'stalled'
-  | 'failed'
-  | 'done'
-  | 'cancelled'
-  | 'archived';
-
-/** The shape both sides share — the index row, structurally. */
-export interface RequestRowLike {
-  request_id: string;
-  kind: string;
-  title: string;
-  status: RequestStatusName;
-  created_by: string;
-  updated_at: string;
-  archived: boolean;
-}
-
-export interface RequestListFilters {
-  status?: readonly RequestStatusName[];
-  kind?: readonly string[];
-  /** Only requests this caller asked for. A view, not a permission (plan §8). */
-  mine?: boolean;
-  /**
-   * `true` → archived only. `false` or absent → active only. "Every request
-   * with any status unless archived" is what the surface opens on, so an
-   * unset filter must never leak the archive into the desk.
-   */
-  archived?: boolean;
-  /** Free text over title and request id. */
-  q?: string;
-  callerEmail?: string;
-}
+/**
+ * M2.1: the row SHAPE, the filter and the order moved to the leaf
+ * `request-list-order.ts`, so `server/lib/requests/list-snapshot.ts` can reach
+ * them without dragging this file's 52 KB of UI vocabulary (and `severity.ts`
+ * behind it) into `admin-shell`'s and `admin-requests`' cold start —
+ * measured -51 KB and -53 KB respectively. Re-exported verbatim, so every
+ * importer of `request-logic.js` keeps the spelling it had; only SERVER code
+ * needs the leaf spelling, and `tests/netlify/function-bundle-budget.test.ts`
+ * is what notices if it stops using it.
+ */
+export { REQUEST_STATUS_RANK, filterRequestRows, sortRequestRows } from './request-list-order.js';
+export type { RequestListFilters, RequestRowLike, RequestStatusName } from './request-list-order.js';
 
 /**
  * ⚑ STALLED_VS_FAILED_SPLIT (T2.3) — OPEN QUESTION, WOLF HAS NOT RULED.
@@ -91,38 +68,6 @@ export const requestSeverityLevel = (status: RequestStatusName): AdminSeverity =
   // running, queued, cancelled, archived — a fact, not a decision.
   return 'info';
 };
-
-/** Attention-first (plan §4.1): what needs a human, then what broke, then what is live, then the rest. */
-export const REQUEST_STATUS_RANK: Record<RequestStatusName, number> = {
-  needs_you: 0,
-  stalled: 1,
-  failed: 2,
-  running: 3,
-  queued: 4,
-  done: 5,
-  cancelled: 6,
-  archived: 7,
-};
-
-export const filterRequestRows = <T extends RequestRowLike>(rows: readonly T[], filters: RequestListFilters): T[] => {
-  const wantArchived = filters.archived === true;
-  const email = filters.callerEmail?.trim().toLowerCase();
-  const needle = filters.q?.trim().toLowerCase();
-  return rows.filter((row) => {
-    if (row.archived !== wantArchived) return false;
-    if (filters.status?.length && !filters.status.includes(row.status)) return false;
-    if (filters.kind?.length && !filters.kind.includes(row.kind)) return false;
-    if (filters.mine && (!email || row.created_by.trim().toLowerCase() !== email)) return false;
-    if (needle && !`${row.title} ${row.request_id}`.toLowerCase().includes(needle)) return false;
-    return true;
-  });
-};
-
-export const sortRequestRows = <T extends RequestRowLike>(rows: readonly T[]): T[] =>
-  [...rows].sort((a, b) => {
-    const rank = REQUEST_STATUS_RANK[a.status] - REQUEST_STATUS_RANK[b.status];
-    return rank !== 0 ? rank : b.updated_at.localeCompare(a.updated_at);
-  });
 
 /**
  * B5: the ONE bucket a row falls into — the shell's pill counts, the

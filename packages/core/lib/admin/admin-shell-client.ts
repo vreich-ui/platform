@@ -1,5 +1,5 @@
 /**
- * admin-shell-client.ts — ONE fetch for the shell's three opening answers.
+ * admin-shell-client.ts — ONE fetch for the shell's whole opening answer.
  *
  * ## What this replaces, and why
  *
@@ -26,6 +26,35 @@
  * Nothing is imported back, so there is no cycle and no new store: each
  * consumer keeps reading from exactly the store it read from before, and no
  * consumer COMPONENT changed at all.
+ *
+ * ## M2.1 / M2.2 — five sections, all of them taken
+ *
+ * The server answers `inventory` and `release` in the same round trip. They
+ * are named in `AdminShellSections`, typed, handed out by
+ * `takeAdminShellSection` under the same one-shot-per-generation rule, and
+ * covered by the same `null`-means-ask-your-own-endpoint fallback. M2.1
+ * installed them with no consumer; M2.2 wired the consumers, and they are
+ * `library-client.ts:fetchInventoryRowsViaShell` and
+ * `release-client.ts:fetchReleaseOverviewViaShell` — each of which primes the
+ * cache its own surfaces already read from.
+ *
+ * A section that comes back `error` or `skipped` sends its consumer to the
+ * dedicated endpoint (`admin-object{inventory}` / `admin-release-state`)
+ * exactly as before the coalescing. `release` is `skipped` when this tenant
+ * has no `snapshots/release.json` yet — and that fallback is also the REPAIR,
+ * because the boot deliberately never rebuilds (see `admin-shell.ts`). The
+ * client cannot tell `error` from `skipped` and does not need to: both mean
+ * "ask your own endpoint".
+ *
+ * ### Forwards compatibility, deliberately asymmetric
+ *
+ * `isSections` requires only the THREE original sections. A client loaded
+ * from a newer deploy than the function it reaches (a tab held open across a
+ * rollback, a stale edge cache) then still gets `access`/`me`/`requests`
+ * coalesced instead of losing the whole payload over two keys it has no
+ * consumer for, and `takeAdminShellSection` returns `null` for a section that
+ * is simply not in the body. Requiring all five would have turned a missing
+ * key into three extra calls.
  *
  * The direction of the `admin-access-client` edge is deliberate and load
  * bearing: `admin-access-client.ts` is also imported by
@@ -136,8 +165,21 @@ export interface AdminShellSection<T> {
 
 export interface AdminShellSections {
   access: AdminShellSection<Record<string, unknown>>;
-  requests: AdminShellSection<Record<string, unknown>>;
   me: AdminShellSection<Record<string, unknown>>;
+  requests: AdminShellSection<Record<string, unknown>>;
+  /**
+   * M2.1. `object_inventory{status:'active'}`'s body —
+   * `{ objects, generated_at, index }`. Optional on the WIRE only (see
+   * "Forwards compatibility"); the current server always sends it.
+   */
+  inventory?: AdminShellSection<Record<string, unknown>>;
+  /**
+   * M2.1. The publication-state overview. `skipped` on a tenant whose
+   * `snapshots/release.json` has not been written yet — the boot never
+   * rebuilds it, so the client's fallback to `admin-release-state` is the
+   * repair.
+   */
+  release?: AdminShellSection<Record<string, unknown>>;
 }
 
 export type AdminShellSectionName = keyof AdminShellSections;
@@ -218,6 +260,13 @@ export function resetAdminShellClientForTests(): void {
 /** Whether a 404 has retired the coalesced path for this page's lifetime. Exported for the test, and for nothing else. */
 export const isAdminShellUnavailable = (): boolean => shellUnavailable;
 
+/**
+ * The three sections that have existed since the coalescing shipped. NOT the
+ * five: see "Forwards compatibility" in the header — a body missing
+ * `inventory`/`release` is an older function, not a corrupt answer, and
+ * throwing the whole payload away over it costs three round trips to save
+ * nothing.
+ */
 const isSections = (value: unknown): value is AdminShellSections => {
   if (!value || typeof value !== 'object') return false;
   const sections = value as Partial<AdminShellSections>;
@@ -330,9 +379,13 @@ export async function takeAdminShellSection<T>(
 
   const current = handoff;
   if (!current || current.taken.has(name)) return null;
+  // Taken BEFORE the answer is inspected, and whatever the answer is: the
+  // one-shot rule is about this generation having asked, never about it
+  // having liked what it got. A section that is absent, `error` or `skipped`
+  // sends this consumer to its own endpoint once — not on every poll.
   current.taken.add(name);
   const section = current.sections[name];
-  if (section.status !== 'ok' || !section.data) return null;
+  if (!section || section.status !== 'ok' || !section.data) return null;
   return section.data as T;
 }
 

@@ -20,12 +20,16 @@ import '../../../../sites/drlurie/config/policy-bindings.js';
 
 import {
   fetchReleaseOverview,
+  fetchReleaseOverviewViaShell,
   invalidateReleaseOverview,
   RELEASE_OVERVIEW_TTL_MS,
   type ReleaseOverview,
 } from './release-client.js';
 import { listRequestsIfChanged } from './requests-client.js';
 import type { GetToken } from '../edit-mode/verbs-client.js';
+import { getAdminStoreEntry, resetAdminStoreForTests } from './admin-store.js';
+import { resetAdminShellClientForTests } from './admin-shell-client.js';
+import { beginNewPageGeneration, resetPageGenerationForTests } from './page-generation.js';
 
 const getToken: GetToken = async () => 'test-token';
 
@@ -123,6 +127,115 @@ describe('release-client: one request where there were several (T5.1 R2, T0.2 F2
       const second = await fetchReleaseOverview(getToken);
       assert.equal(second.deploy.state, 'ready');
       assert.equal(mock.calls.length, 2);
+    } finally {
+      mock.restore();
+    }
+  });
+});
+
+// ─── M2.2: `fetchReleaseOverviewViaShell` — the coalesced `admin-shell` boot ─
+const shellBody = (release: unknown) => ({
+  ok: true,
+  status: 200,
+  sections: {
+    access: { status: 'ok', data: { authenticated: true, isAdmin: true } },
+    requests: { status: 'ok', data: { requests: [], total: 0, seq: 1, muted: [], last_notified: {} } },
+    me: { status: 'ok', data: { user: { email: 'owner@example.test' }, roles: ['owner'] } },
+    inventory: { status: 'ok', data: { objects: [], generated_at: '2026-09-16T00:00:00.000Z', index: {} } },
+    release: { status: 'ok', data: release },
+  },
+});
+
+describe('fetchReleaseOverviewViaShell', () => {
+  const teardown = () => {
+    resetAdminShellClientForTests();
+    resetPageGenerationForTests();
+    resetAdminStoreForTests();
+    invalidateReleaseOverview();
+  };
+  afterEach(teardown);
+
+  it('a shell hit costs exactly one call and primes this module’s own cache', async () => {
+    teardown();
+    beginNewPageGeneration();
+    const withAsOf = { ...overview(), as_of: '2026-09-16T00:05:00.000Z' };
+    const mock = mockFetch(() => json(shellBody(withAsOf)));
+    try {
+      const result = await fetchReleaseOverviewViaShell(getToken);
+      assert.equal(mock.calls.length, 1);
+      assert.deepEqual(result, withAsOf);
+
+      // Primed: a later plain `fetchReleaseOverview` call reads it back
+      // without a second network request.
+      const again = await fetchReleaseOverview(getToken);
+      assert.equal(mock.calls.length, 1, 'the plain call reused the primed cache — no second request');
+      assert.deepEqual(again, withAsOf);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('records the hit in the shared ledger as `boot`, with the section’s as_of', async () => {
+    teardown();
+    beginNewPageGeneration();
+    const withAsOf = { ...overview(), as_of: '2026-09-16T00:05:00.000Z' };
+    const mock = mockFetch(() => json(shellBody(withAsOf)));
+    try {
+      await fetchReleaseOverviewViaShell(getToken);
+      const entry = getAdminStoreEntry('release');
+      assert.equal(entry?.source, 'boot');
+      assert.equal(entry?.asOf, '2026-09-16T00:05:00.000Z');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('falls back to fetchReleaseOverview, unchanged, when release is `skipped` (M1 not wired yet)', async () => {
+    teardown();
+    beginNewPageGeneration();
+    let call = 0;
+    const mock = mockFetch(() => {
+      call += 1;
+      if (call === 1) {
+        const body = shellBody(overview());
+        body.sections.release = { status: 'skipped', code: 'release_source_unavailable' } as never;
+        return json(body);
+      }
+      // The fallback hits the DEDICATED `admin-release-state` endpoint.
+      return json(overview());
+    });
+    try {
+      const result = await fetchReleaseOverviewViaShell(getToken);
+      assert.equal(mock.calls.length, 2, 'the skipped section falls back to the dedicated endpoint');
+      assert.equal(result.deploy.state, 'ready');
+      assert.equal(getAdminStoreEntry('release')?.source, 'network');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('falls back when the shell has no `sections` at all (an older deploy, or a 404)', async () => {
+    teardown();
+    beginNewPageGeneration();
+    const mock = mockFetch(() => json(overview()));
+    try {
+      const result = await fetchReleaseOverviewViaShell(getToken);
+      assert.equal(mock.calls.length, 2);
+      assert.equal(result.deploy.state, 'ready');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('a mutation invalidates the ledger entry a boot hit wrote, same as a network one', async () => {
+    teardown();
+    beginNewPageGeneration();
+    const mock = mockFetch(() => json(shellBody(overview())));
+    try {
+      await fetchReleaseOverviewViaShell(getToken);
+      assert.notEqual(getAdminStoreEntry('release'), undefined);
+      invalidateReleaseOverview();
+      assert.equal(getAdminStoreEntry('release'), undefined);
     } finally {
       mock.restore();
     }

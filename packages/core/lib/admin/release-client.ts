@@ -1,12 +1,15 @@
 /**
  * Release-state client (T5.1 R2 / T0.2 F2).
  *
- * `admin-release-state` is the most expensive read in the admin: the handler
- * runs its own full object-store inventory sweep, then calls the Netlify
+ * `admin-release-state` WAS the most expensive read in the admin: the handler
+ * ran its own full object-store inventory sweep, then called the Netlify
  * deploys API twice, then GitHub's `/compare` once per distinct publish
  * commit. T0.2 found SEVEN call sites for it and — worse — several on the
  * SAME page load (`/admin/content/<id>` fired it twice; the objects plane
- * has two independent effects that both want it).
+ * has two independent effects that both want it). Since M1 the server side is
+ * three parallel blob reads and no external call, but the call-site count has
+ * not changed, so the dedupe below is still what keeps one page load to one
+ * request.
  *
  * This module gives it the shape `library-client.ts` already has: a
  * module-scope TTL cache plus in-flight dedupe. Module scope matters — the
@@ -19,10 +22,23 @@
  * cosmetic if slightly stale; release state drives publish/approval
  * affordances, so it must never be painted from a previous page's snapshot
  * without a live fetch behind it.
+ *
+ * M2.2: `fetchReleaseOverviewViaShell` adds one more source ahead of the
+ * network — this navigation's coalesced `admin-shell` boot, which carries the
+ * `release` section for free alongside `access`/`me`/`requests`/`inventory`
+ * whenever this tenant has a `snapshots/release.json` (see `admin-shell.ts`'s
+ * own header for why an absent one answers `skipped` rather than rebuilding on
+ * a page path). A `skipped` or `error`
+ * section, or the section already taken this generation, is `null` from
+ * `takeAdminShellSection` and this module falls back to
+ * `fetchReleaseOverview` exactly as it does today — the two-reasons refusal
+ * this file's header already explains does not change.
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { EditorialObjectState } from './editorial-state.js';
 import { currentPageSignal } from './page-generation.js';
+import { takeAdminShellSection } from './admin-shell-client.js';
+import { invalidateAdminStoreEntry, recordAdminStoreEntry } from './admin-store.js';
 
 const STATE_ENDPOINT = '/.netlify/functions/admin-release-state';
 const RELEASE_ENDPOINT = '/.netlify/functions/admin-release';
@@ -59,6 +75,14 @@ export interface ReleaseOverview {
   objects: ReleaseObjectView[];
   waiting_count: number;
   pending_approval_count: number;
+  /**
+   * M1: when the DEPLOY facts in this response were gathered
+   * (`snapshots/release.json`'s stamp). The object rows are live as of the
+   * request; the deploy header can be up to one refresh interval old, and the
+   * surfaces render `releaseAsOfLabel(as_of)` beside it rather than implying
+   * "now". Optional: a function deploy older than M1 answers without it.
+   */
+  as_of?: string;
 }
 
 export interface ReleaseResultView {
@@ -96,6 +120,7 @@ async function requestReleaseOverview(getToken: GetToken): Promise<ReleaseOvervi
 function runFetch(getToken: GetToken): Promise<ReleaseOverview> {
   const thisFetch = requestReleaseOverview(getToken).then((overview) => {
     memoryCache = { overview, fetchedAt: Date.now() };
+    recordAdminStoreEntry('release', overview, overview.as_of, 'network');
     return overview;
   });
   inflight = thisFetch;
@@ -124,13 +149,51 @@ export async function fetchReleaseOverview(getToken: GetToken, opts?: { force?: 
 }
 
 /**
+ * M2.2 — ask this navigation's coalesced `admin-shell` boot before paying for
+ * a dedicated `admin-release-state` round trip. Same contract as
+ * `fetchAdminAccessStateViaShell`: a hit is recorded as `boot` in the shared
+ * ledger (`admin-store.ts`) and primes this module's own cache; a miss (the
+ * section already taken this generation, `error`, `skipped` — see this
+ * file's own header — or an older deploy) falls back to
+ * `fetchReleaseOverview` unchanged.
+ */
+export async function fetchReleaseOverviewViaShell(getToken: GetToken): Promise<ReleaseOverview> {
+  const token = await getToken();
+  const fromShell = await takeAdminShellSection<ReleaseOverview>(token, 'release');
+  if (fromShell) {
+    memoryCache = { overview: fromShell, fetchedAt: Date.now() };
+    recordAdminStoreEntry('release', fromShell, fromShell.as_of, 'boot');
+    return fromShell;
+  }
+  return fetchReleaseOverview(getToken);
+}
+
+/**
  * Drop the cache so the next read hits the network. Call this from every path
  * that can change release state — publishing, approving, requesting changes —
  * so the TTL can never hide an editor's own action from them.
+ *
+ * M1 kept this, and it is worth saying why, because a write-time snapshot looks
+ * at first like it makes the call redundant. It does not, for two reasons.
+ *
+ * First, what this drops is a BROWSER cache with its own 15 s TTL. The server
+ * being instantly correct does nothing about a client that will not ask for
+ * 15 s, and the surfaces that call this — a review decision, a force-release, a
+ * publish — are precisely the ones where the editor is waiting to see their own
+ * action reflected.
+ *
+ * Second, only two of the paths that change release state write the snapshot.
+ * `object_publish` and `release_to_production` do; approving an object, or
+ * requesting changes, does not — those change `review_state` / `approval_state`,
+ * which the server re-derives from the live inventory on every read rather than
+ * serving from the snapshot (see `release-overview.ts`). So the fresh fetch this
+ * forces is exactly what surfaces those, and dropping this call would have
+ * reintroduced the up-to-15 s blindness it was written to remove.
  */
 export function invalidateReleaseOverview(): void {
   memoryCache = null;
   inflight = null;
+  invalidateAdminStoreEntry('release');
 }
 
 export async function triggerProductionRelease(getToken: GetToken): Promise<ReleaseResultView> {

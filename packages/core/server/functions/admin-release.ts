@@ -17,6 +17,12 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
 import { resolveRolesFromEvent } from '../lib/request-roles.js';
 import { releaseToProduction } from '../lib/production-release.js';
+import { getSiteObjectsBlobStore } from '../lib/blob-store.js';
+import {
+  refreshReleaseSnapshotAfterWrite,
+  RELEASE_ANCESTRY_INTERACTIVE_BUDGET_MS,
+  type ReleaseSnapshotStore,
+} from '../lib/release/snapshot-store.js';
 import { releaseHttpStatusFor } from '../../lib/release/release-async.js';
 
 type LambdaEvent = {
@@ -81,6 +87,28 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   try {
     const result = await releaseToProduction({ ...parseOptions(event), envNames: binding.env });
+    /**
+     * M1 — refresh `snapshots/release.json` while we still know a build was
+     * just fired. The browser calls `invalidateReleaseOverview()` and refetches
+     * immediately after this returns, and that refetch is now ONE blob read: if
+     * the snapshot still said `ready` the dashboard would show "Release
+     * started" over a green "up to date" badge. Full refresh (the deploy facts
+     * are the ones that moved), interactive ancestry budget, best-effort — the
+     * hook has already fired and nothing here may fail the release.
+     */
+    if (result.buildTriggered) {
+      try {
+        const snapshotStore = (await getSiteObjectsBlobStore(event, binding)) as unknown as ReleaseSnapshotStore;
+        await refreshReleaseSnapshotAfterWrite(snapshotStore, {
+          nowMs: Date.now(),
+          source: 'release',
+          budgetMs: RELEASE_ANCESTRY_INTERACTIVE_BUDGET_MS,
+          envNames: binding.env,
+        });
+      } catch (error) {
+        console.warn('Admin_Release: release snapshot refresh skipped.', error);
+      }
+    }
     // A configuration gap (no build hook / no deploy API) is a 400 the operator
     // must fix, not a 200 "released:false" the UI might read as "still building".
     // `building` is a 202: accepted, hook fired, go poll.

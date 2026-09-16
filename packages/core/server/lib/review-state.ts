@@ -239,32 +239,10 @@ export const decideReview = (record: ObjectRecord, input: DecideReviewInput): Re
 };
 
 // ─── effective approval (what the publish gate reads) ────────────────────────
-
-export type EffectiveApproval =
-  | { state: 'none' }
-  | { state: 'open' }
-  | { state: 'changes_requested' }
-  | { state: 'approved_stale'; approval: ReviewState['decisions'][number] }
-  | { state: 'approved_current'; approval: ReviewState['decisions'][number] };
-
-/**
- * Derives approval currency from the pin, never from review.state alone: an
- * 'approved' record whose content_revision has moved past the pinned one is
- * stale (a body write happened after approval — D§3.9 invalidation), while
- * version-only churn (locks, publish stamps) leaves it current.
- */
-export const effectiveApproval = (record: ObjectRecord): EffectiveApproval => {
-  const review = record.review;
-  if (!review) return { state: 'none' };
-  if (review.state === 'open') return { state: 'open' };
-  if (review.state === 'changes_requested') return { state: 'changes_requested' };
-
-  const last = review.decisions[review.decisions.length - 1];
-  if (!last || last.decision !== 'approve') return { state: 'none' };
-  return last.content_revision === record.content_revision
-    ? { state: 'approved_current', approval: last }
-    : { state: 'approved_stale', approval: last };
-};
+//
+// Lives in the dependency-free `review-approval.ts` and is re-exported here so
+// every existing importer keeps its import. See that file for why it moved.
+export { effectiveApproval, type EffectiveApproval } from './review-approval.js';
 
 // ─── discard (C§2.4 compensating inverse write) ──────────────────────────────
 

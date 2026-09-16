@@ -16,6 +16,7 @@ import {
   isMuted,
   loadMailedLedger,
   loadNotifyState,
+  loadRequestInbox,
   loadSeenLedger,
   muteRequest,
   setEmailMode,
@@ -171,5 +172,98 @@ describe('how much mail a person wants', () => {
     await setEmailMode(store, 'editor@example.com', 'off');
     assert.equal(emailModeFor(await loadNotifyState(store, 'editor@example.com')), 'off');
     assert.equal(emailModeFor(await loadNotifyState(store, 'other@example.com')), 'immediate');
+  });
+});
+
+/**
+ * M2.1 — the person's inbox state in ONE round trip instead of two.
+ *
+ * The requests surface used to close with `loadNotifyState` and then
+ * `loadSeenLedger`, in series, because the ledger loader takes the settings
+ * doc to fall back on. `loadRequestInbox` issues both reads together and
+ * applies the fallback afterwards, which is the whole change — so what has to
+ * be pinned is (a) the two reads are genuinely concurrent and (b) every
+ * answer, legacy fallback included, is byte-identical to the serial pair.
+ *
+ * The merged `users/<id>/inbox.json` the M2.1 task asked for was REFUSED —
+ * `store.ts`'s header splits `notify/` from `notify-seen/` by writing
+ * component to stop one tab's ack reverting another tab's mute, and Netlify
+ * Blobs has no compare-and-swap to put that back. The function's own header
+ * carries the reasoning; this test carries the behaviour.
+ */
+describe('the inbox read (M2.1)', () => {
+  /** A store whose reads all block until released, so concurrency is observable rather than assumed. */
+  const gatedStore = () => {
+    const data = new Map<string, string>();
+    const started: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const store = {
+      get: async (key: string) => {
+        started.push(key);
+        await gate;
+        return data.get(key) ?? null;
+      },
+      setJSON: async (key: string, value: unknown) => {
+        data.set(key, JSON.stringify(value));
+      },
+      list: async () => ({ blobs: [] }),
+    } as unknown as EditorialRequestStore;
+    return { store, data, started, release };
+  };
+
+  it('issues the settings read and the ledger read together, not one after the other', async () => {
+    const { store, started, release } = gatedStore();
+    const pending = loadRequestInbox(store, 'editor@example.com');
+    // Both reads must already be in flight while NEITHER has answered. A
+    // serial pair has issued exactly one key at this point.
+    await Promise.resolve();
+    assert.deepEqual(
+      [...started].sort(),
+      ['requests/notify-seen/editor@example.com.json', 'requests/notify/editor@example.com.json'],
+      `only ${started.length} read(s) in flight — the inbox pair is serial again`
+    );
+    release();
+    await pending;
+  });
+
+  it('answers exactly what the serial pair answered, ledger and settings alike', async () => {
+    const store = memoryStore();
+    await muteRequest(store, 'editor@example.com', 'req_a');
+    await setEmailMode(store, 'editor@example.com', 'daily');
+    await ackNotifications(store, 'editor@example.com', { req_a: 'done' });
+
+    const inbox = await loadRequestInbox(store, 'EDITOR@Example.com');
+    assert.deepEqual(inbox.notify, await loadNotifyState(store, 'editor@example.com'));
+    assert.deepEqual(inbox.seen, await loadSeenLedger(store, 'editor@example.com'));
+    assert.deepEqual(inbox.seen, { req_a: 'done' });
+    assert.equal(emailModeFor(inbox.notify), 'daily');
+  });
+
+  it('still heals a pre-split doc: no ledger blob, so the settings doc\'s legacy map answers', async () => {
+    const store = memoryStore();
+    // A doc written before the W19 split: one document carrying `last_notified`.
+    await store.setJSON('requests/notify/editor@example.com.json', {
+      schema_version: 'editorial-request-notify.v1',
+      person: 'editor@example.com',
+      updated_at: new Date().toISOString(),
+      muted: ['req_muted'],
+      last_notified: { req_old: 'needs_you' },
+    });
+
+    const inbox = await loadRequestInbox(store, 'editor@example.com');
+    assert.deepEqual(inbox.seen, { req_old: 'needs_you' }, 'the legacy map still dedupes');
+    assert.deepEqual(inbox.notify?.muted, ['req_muted']);
+    // And it is a COPY, so nothing the caller does to it reaches the settings doc.
+    inbox.seen.req_old = 'done';
+    assert.deepEqual((await loadNotifyState(store, 'editor@example.com'))?.last_notified, { req_old: 'needs_you' });
+  });
+
+  it('answers empty for a person with no documents at all', async () => {
+    const inbox = await loadRequestInbox(memoryStore(), 'nobody@example.com');
+    assert.equal(inbox.notify, undefined);
+    assert.deepEqual(inbox.seen, {});
   });
 });

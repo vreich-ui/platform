@@ -43,13 +43,9 @@ import {
   type ObjectLockStore,
 } from './object-lock.js';
 import type { Role } from './roles.js';
-import {
-  objectRecordKey,
-  objectStatusIndexKey,
-  objectStatusIndexPrefix,
-  OBJECT_STORE_MARKER_VALUE,
-} from './object-store-keys.js';
-import { sweepInventoryRows } from './objects/index-store.js';
+import { objectRecordKey, objectStatusIndexPrefix } from './object-store-keys.js';
+import { readInventoryRows } from './objects/index-store.js';
+import { putObjectRecord } from './objects/record-writer.js';
 import { sweepSearchDocs } from './objects/search-index-store.js';
 import { DEFAULT_LIMIT as SEARCH_DEFAULT_LIMIT, rankSearchDocs } from '../../lib/search/content-search.js';
 import { DEFAULT_SEARCH_TYPES } from '../../lib/search/search-doc.js';
@@ -1362,7 +1358,7 @@ const dispatchObjectVerb = async (
        * this code (an unusual store, or the local file-backed shim) and the
        * cost has silently reverted to the old sweep.
        */
-      const sweep = await sweepInventoryRows(store, {
+      const sweep = await readInventoryRows(store, {
         nowMs: ts,
         ...(options.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
         ...(request.object_type ? { objectType: request.object_type } : {}),
@@ -1497,8 +1493,10 @@ const dispatchObjectVerb = async (
         version: 1,
         content_revision: 1,
       };
-      await store.setJSON(key, record);
-      await store.setJSON(objectStatusIndexKey(objectType, 'active', objectIdValue), OBJECT_STORE_MARKER_VALUE);
+      // M0.1: the record, its status marker and its inventory row are one
+      // write through the choke point — see `objects/record-writer.ts` for the
+      // order and for what each interruption leaves behind.
+      await putObjectRecord(store, { record, nowMs: ts });
       return ok({ record });
     }
 
@@ -2486,7 +2484,7 @@ const dispatchObjectVerb = async (
         });
       }
 
-      await store.setJSON(key, appliedRecord);
+      await putObjectRecord(store, { record: appliedRecord, nowMs: ts });
 
       // Ship the trail ONLY now that the save it describes has actually
       // persisted — atomic with the save (one call from the caller, not a
@@ -2688,7 +2686,7 @@ const dispatchObjectVerb = async (
       });
       if (!result.ok) return err(result.status, result.body);
 
-      await store.setJSON(key, result.record);
+      await putObjectRecord(store, { record: result.record, nowMs: ts });
       return ok({ ...result.body, version: result.record.version, content_revision: result.record.content_revision });
     }
 
@@ -2708,7 +2706,7 @@ const dispatchObjectVerb = async (
       });
       if (!result.ok) return err(result.status, result.body);
 
-      await store.setJSON(key, result.record);
+      await putObjectRecord(store, { record: result.record, nowMs: ts });
       return ok({ ...result.body, version: result.record.version, content_revision: result.record.content_revision });
     }
 
@@ -2723,7 +2721,7 @@ const dispatchObjectVerb = async (
       const result = discardProposal(record, { entries: request.entries, actor: principal, at: timestamp });
       if (!result.ok) return err(result.status, result.body);
 
-      await store.setJSON(key, result.record);
+      await putObjectRecord(store, { record: result.record, nowMs: ts });
       return ok({ ...result.body, version: result.record.version, content_revision: result.record.content_revision });
     }
 

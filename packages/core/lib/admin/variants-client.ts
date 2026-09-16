@@ -19,9 +19,25 @@
  * digest (`server/lib/object-inventory.ts`) — so the family graph, the
  * permalink column and the judgement table are all derivable from the listing
  * itself. One call, whatever the corpus size.
+ *
+ * ## M2.2 — the SAME one call, for free, off the boot payload
+ *
+ * `fetchVariantMembers`'s request is `{action:'inventory', object_type:
+ * 'content_item'}` — a server-side filter over the identical rows this
+ * navigation's `admin-shell` boot already carries (unfiltered) as its
+ * `inventory` section. `fetchVariantMembersViaShell` asks the shell first and
+ * re-applies the SAME client-side filter this file already had (see
+ * `mapInventoryRowsToVariantMembers`, extracted rather than duplicated) —
+ * so a hit costs nothing beyond the boot call and cannot drift from the
+ * network path's own answer. A miss (the section already taken this
+ * generation, `error`, `skipped`, or an older deploy) falls back to
+ * `fetchVariantMembers` unchanged.
  */
 import { callObjectVerb, type GetToken } from '../edit-mode/verbs-client.js';
 import type { VariantMember, VariantScore } from './variant-experiments.js';
+import { takeAdminShellSection } from './admin-shell-client.js';
+import { primeInventoryCache } from './library-client.js';
+import type { LibraryRow } from './library-logic.js';
 
 export type { GetToken };
 
@@ -74,8 +90,11 @@ const stringOrUndefined = (value: unknown): string | undefined =>
   typeof value === 'string' && value ? value : undefined;
 
 /**
- * Every article, with the three body facts the family derivation needs — from
- * ONE `inventory` call.
+ * The row → `VariantMember` transform, extracted (M2.2) so
+ * `fetchVariantMembers` (the dedicated `admin-object{inventory}` call) and
+ * `fetchVariantMembersViaShell` (this navigation's `admin-shell` boot) map
+ * the identical rows through the identical logic — one function to keep in
+ * sync, not two that could drift.
  *
  * `viewerId` is the signed-in user's identity subject when the caller knows it:
  * a lock the VIEWER holds is not an obstacle (checkout is re-entrant for the
@@ -83,6 +102,42 @@ const stringOrUndefined = (value: unknown): string | undefined =>
  * someone else's — the safe direction, since the worst it does is show a
  * blocker the server would not have raised.
  */
+function mapInventoryRowsToVariantMembers(rows: InventoryArticleRow[], viewerId?: string): VariantMember[] {
+  return rows
+    .filter((row) => row.object_type === 'content_item')
+    .map((row) => {
+      const content = row.content ?? {};
+      const parentId = stringOrUndefined(content.parent_content_id);
+      const slug = stringOrUndefined(content.slug);
+      const scores = readScores(content.scores);
+      const lockOwner = row.lock?.held ? row.lock.owner_id : undefined;
+      return {
+        object_id: row.object_id,
+        display_name: row.display_name,
+        status: row.status,
+        review_state: row.review_state,
+        ...(row.approval_state ? { approval_state: row.approval_state } : {}),
+        ...(row.requires_approval !== undefined ? { requires_approval: row.requires_approval } : {}),
+        published_time: row.published_time,
+        unpublished_changes: row.unpublished_changes,
+        updated_at: row.updated_at,
+        ...(row.lock?.held
+          ? {
+              lock: {
+                held: true,
+                ...(row.lock.owner_label ? { owner_label: row.lock.owner_label } : {}),
+                own: Boolean(viewerId && lockOwner === viewerId),
+              },
+            }
+          : {}),
+        ...(parentId ? { parent_content_id: parentId } : {}),
+        ...(slug ? { slug } : {}),
+        ...(scores ? { scores } : {}),
+      } satisfies VariantMember;
+    });
+}
+
+/** Every article, with the three body facts the family derivation needs — from ONE `inventory` call. */
 export async function fetchVariantMembers(
   getToken: GetToken,
   options: { viewerId?: string } = {}
@@ -91,40 +146,33 @@ export async function fetchVariantMembers(
   if (listed.status !== 200) {
     throw new Error((listed.body?.error as string) || `The article inventory could not be read (${listed.status}).`);
   }
-  const rows = ((listed.body.objects as InventoryArticleRow[] | undefined) ?? []).filter(
-    (row) => row.object_type === 'content_item'
-  );
+  const rows = (listed.body.objects as InventoryArticleRow[] | undefined) ?? [];
+  return mapInventoryRowsToVariantMembers(rows, options.viewerId);
+}
 
-  return rows.map((row) => {
-    const content = row.content ?? {};
-    const parentId = stringOrUndefined(content.parent_content_id);
-    const slug = stringOrUndefined(content.slug);
-    const scores = readScores(content.scores);
-    const lockOwner = row.lock?.held ? row.lock.owner_id : undefined;
-    return {
-      object_id: row.object_id,
-      display_name: row.display_name,
-      status: row.status,
-      review_state: row.review_state,
-      ...(row.approval_state ? { approval_state: row.approval_state } : {}),
-      ...(row.requires_approval !== undefined ? { requires_approval: row.requires_approval } : {}),
-      published_time: row.published_time,
-      unpublished_changes: row.unpublished_changes,
-      updated_at: row.updated_at,
-      ...(row.lock?.held
-        ? {
-            lock: {
-              held: true,
-              ...(row.lock.owner_label ? { owner_label: row.lock.owner_label } : {}),
-              own: Boolean(options.viewerId && lockOwner === options.viewerId),
-            },
-          }
-        : {}),
-      ...(parentId ? { parent_content_id: parentId } : {}),
-      ...(slug ? { slug } : {}),
-      ...(scores ? { scores } : {}),
-    } satisfies VariantMember;
-  });
+/**
+ * M2.2 — ask this navigation's coalesced `admin-shell` boot before paying for
+ * a dedicated `admin-object{inventory}` round trip. The shell answers the
+ * FULL, unfiltered inventory; `mapInventoryRowsToVariantMembers` re-applies
+ * the same `content_item` filter `fetchVariantMembers` always has, so a hit
+ * is exactly as correct. Also primes `library-client.ts`'s shared cache, so
+ * another surface asking for the full inventory on this same page (the Cmd-K
+ * palette) reads it back for free instead of asking twice. A miss (the
+ * section already taken this generation, `error`, `skipped`, or an older
+ * deploy) falls back to `fetchVariantMembers` unchanged.
+ */
+export async function fetchVariantMembersViaShell(
+  getToken: GetToken,
+  options: { viewerId?: string } = {}
+): Promise<VariantMember[]> {
+  const token = await getToken();
+  const fromShell = await takeAdminShellSection<{ objects?: InventoryArticleRow[] }>(token, 'inventory');
+  if (fromShell) {
+    const rows = fromShell.objects ?? [];
+    primeInventoryCache(rows as unknown as LibraryRow[]);
+    return mapInventoryRowsToVariantMembers(rows, options.viewerId);
+  }
+  return fetchVariantMembers(getToken, options);
 }
 
 // ─── create_variant ─────────────────────────────────────────────────────────
