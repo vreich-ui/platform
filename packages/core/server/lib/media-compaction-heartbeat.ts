@@ -31,6 +31,9 @@ import type { ArtifactIndexStore } from './artifact-index.js';
 
 export const MEDIA_COMPACTION_HEARTBEAT_KEY = 'maintenance/media-compaction-sweep.json';
 
+/** Where the scheduled tick leaves the one-shot token its worker must present. */
+export const MEDIA_COMPACTION_TRIGGER_KEY = 'maintenance/media-compaction-trigger.json';
+
 /** Cursors for the two passes. `null` means "this pass finished its cycle". */
 export type MediaCompactionResume = {
   orphanCursor: number | null;
@@ -113,3 +116,39 @@ export const mediaCompactionAgeHours = (
 
 /** A cycle is stale once a daily job has had a full extra day to finish it. */
 export const MEDIA_COMPACTION_STALE_HOURS = 25;
+
+
+/**
+ * The one-shot trigger token, the same mechanic `editorial-request-sweep` uses.
+ *
+ * A `-background` function is a PUBLIC HTTP endpoint and this one's side effects
+ * are real (soft-deletes and byte deletes across the whole artifact plane), so
+ * an unauthenticated POST must not be able to start one. Minting also
+ * INVALIDATES any earlier token, so a pass still running when the next tick
+ * fires cannot be joined by a second.
+ */
+export const mintMediaCompactionTriggerToken = async (indexStore: ArtifactIndexStore): Promise<string> => {
+  const token = `mcs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+  await indexStore.setJSON(MEDIA_COMPACTION_TRIGGER_KEY, { token, mintedAtISO: new Date().toISOString() });
+  return token;
+};
+
+/** True exactly once per minted token; every replay and every forged POST is false. */
+export const consumeMediaCompactionTriggerToken = async (
+  indexStore: ArtifactIndexStore,
+  token: string
+): Promise<boolean> => {
+  let stored: unknown;
+  try {
+    const raw = await indexStore.get(MEDIA_COMPACTION_TRIGGER_KEY);
+    if (!raw) return false;
+    stored = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+
+  if (!isRecord(stored) || typeof stored.token !== 'string' || stored.token !== token) return false;
+
+  await indexStore.setJSON(MEDIA_COMPACTION_TRIGGER_KEY, { token: null, consumedAtISO: new Date().toISOString() });
+  return true;
+};
