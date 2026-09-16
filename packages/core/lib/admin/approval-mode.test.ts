@@ -7,7 +7,9 @@ import {
   isRunSafeApproval,
   readPersistedRunApprovalMode,
   readPersistedTestMode,
+  RUN_MODE_OPTION_HINTS,
   RUN_MODE_OPTIONS,
+  RUN_MODE_SCOPE_HINT,
   runModeControl,
   shouldAutoApproveRunTool,
   writePersistedRunApprovalMode,
@@ -202,6 +204,53 @@ describe('run-approval-mode persistence', () => {
     assert.equal(readPersistedRunApprovalMode('chat-1'), 'ask');
     assert.equal(readPersistedRunApprovalMode('chat-2'), 'ask');
     assert.equal(readPersistedRunApprovalMode(undefined), 'ask');
+  });
+});
+
+describe('PCL-P2 — a click on the run-mode control is never silently ignored', () => {
+  // Root cause: `ChatRun.autonomy` (server/lib/agent/chat-store.ts) is
+  // resolved once at `send` and frozen for that run's whole lifetime
+  // (`autonomyForCall`, server/lib/agent/registry.ts) — a legitimate
+  // constraint, not a bug. This control cannot and does not try to rewrite
+  // that frozen map (`sendChatMessage`, lib/admin/chat-client.ts, never
+  // sends the mode at all); what it changes is whether the human's approval
+  // is auto-submitted for whatever the frozen autonomy decides needs one —
+  // for THIS run's remaining prompts, and for the next one this chat sends.
+  it('a mode picked between two pending calls decides the SECOND one, proving the click is live, not cosmetic', () => {
+    const scope = 'chat-next-turn';
+    writePersistedRunApprovalMode(scope, 'ask');
+
+    // "Turn" 1: a pending call arrives while still in "Ask each time" — no
+    // auto-approval, exactly like before this control existed.
+    assert.equal(shouldAutoApproveRunTool(readPersistedRunApprovalMode(scope), 'patch'), false);
+
+    // Between turns the editor opens the dropdown and picks "Approve safe
+    // actions" — the one action the control offers.
+    writePersistedRunApprovalMode(scope, 'safe-run');
+
+    // "Turn" 2's pending call arrives afterwards. It is decided by the mode
+    // read AT THAT MOMENT — not the one turn 1 saw — which is what "changes
+    // what the next turn does" means: the same tool that had to ask a moment
+    // ago now clears itself.
+    assert.equal(shouldAutoApproveRunTool(readPersistedRunApprovalMode(scope), 'patch'), true);
+
+    // Switching back before a third call arrives restores asking for it too
+    // — the control keeps working in both directions, every time.
+    writePersistedRunApprovalMode(scope, 'ask');
+    assert.equal(shouldAutoApproveRunTool(readPersistedRunApprovalMode(scope), 'release_to_production'), false);
+  });
+
+  it('every option carries a non-empty hint, so a tool this run already runs automatically (or already refuses) is explained rather than left looking inert', () => {
+    for (const option of RUN_MODE_OPTIONS) {
+      const hint = RUN_MODE_OPTION_HINTS[option.value];
+      assert.equal(typeof hint, 'string');
+      assert.ok(hint.length > 0);
+    }
+    assert.equal(typeof RUN_MODE_SCOPE_HINT, 'string');
+    assert.ok(RUN_MODE_SCOPE_HINT.length > 0);
+    // The hint itself names the constraint this control cannot cross, so a
+    // reader who hovers before clicking is told the truth up front.
+    assert.match(RUN_MODE_SCOPE_HINT, /before the run starts/);
   });
 });
 

@@ -31,6 +31,8 @@ import {
 } from '../lib/blob-store.js';
 import { parseBlockage } from '../../lib/admin/blockage.js';
 import { matchBlockageAnswer } from '../../lib/admin/blockage-answer-matcher.js';
+import { starterChipsFromPatchOps, type StarterChip } from '../../lib/admin/starter-chips.js';
+import { buildObjectContract } from '../../lib/registry/object-contract.js';
 import { applyRemedy, createBlobRemedyLedger, type RemedyLedgerStore } from '../lib/requests/remedy.js';
 import {
   getGovernanceBlobStore,
@@ -70,6 +72,7 @@ import {
   type RegistryKind,
 } from '../lib/agent/chat-store.js';
 import { visibleChatDocs } from '../lib/agent/chat-visibility.js';
+import { heartbeatPendingApprovalLocks, pendingApprovalLockRefs } from '../lib/agent/pending-approval-lock.js';
 import {
   agentProviderSchema,
   getAgentProfilesBlobStore,
@@ -120,8 +123,7 @@ const CACHE_CONTROL = 'private, no-cache';
  * second full stringify of the whole body on every read — on a latency
  * branch, on this surface's hottest read paths.
  */
-const etagForSerialized = (serialized: string): string =>
-  `"${createHash('sha1').update(serialized).digest('hex')}"`;
+const etagForSerialized = (serialized: string): string => `"${createHash('sha1').update(serialized).digest('hex')}"`;
 
 const readJsonResponse = (event: LambdaEvent, body: Record<string, unknown>) => {
   const serialized = timeSerialize(() => JSON.stringify({ ok: true, status: 200, ...body }));
@@ -153,6 +155,13 @@ const readJsonResponse = (event: LambdaEvent, body: Record<string, unknown>) => 
  */
 const ORIGIN_SLUG = /^[a-z0-9-]{1,64}$/;
 const ORIGIN_ID = /^[A-Za-z0-9_.:-]{1,256}$/;
+/**
+ * PCL-P4: a starter CHIP's key is a house patch-op name
+ * (`schema/object-patch-ops.ts`'s `${verb}_${rest}` grammar, e.g.
+ * `upsert_faq_item`) — underscored, unlike the hub `AgentStarter.key` slugs
+ * `ORIGIN_SLUG` polices above, so it gets its own, slightly wider pattern.
+ */
+const ORIGIN_STARTER_KEY = /^[a-z0-9_-]{1,64}$/;
 
 const createOriginSchema = z.object({
   surface: z.string().regex(ORIGIN_SLUG),
@@ -172,6 +181,8 @@ const sendOriginSchema = z.object({
     .object({ object_type: z.string().regex(ORIGIN_ID), object_id: z.string().regex(ORIGIN_ID) })
     .optional()
     .catch(undefined),
+  /** PCL-P4 — the starter chip key this send's opening text still traces back to, if any. */
+  starter: z.string().regex(ORIGIN_STARTER_KEY).optional().catch(undefined),
 });
 
 const requestSchema = z.discriminatedUnion('action', [
@@ -316,10 +327,33 @@ const clientManagerView = (doc: ChatDoc) => ({
   engine: 'cms_agent' as const,
 });
 
+/**
+ * PCL-P4 — starter chips for an object-bound chat, derived from the SAME
+ * `buildObjectContract(...).patch_ops` (`agent_authored` ops) the engine
+ * itself trusts as "what this object type can really do"
+ * (`agent/context.ts`'s `agentAuthoredOps`). Cached per object type per
+ * invocation: `chatSummary` runs once per chat in `list_chats`, and rebuilding
+ * a body-schema-derived contract per row would be wasted work for a value
+ * that only depends on the type.
+ */
+const starterChipsCache = new Map<string, StarterChip[]>();
+const starterChipsForObjectType = (objectType: string): StarterChip[] => {
+  const cached = starterChipsCache.get(objectType);
+  if (cached) return cached;
+  const parsed = objectTypeSchema.safeParse(objectType);
+  // An unrecognized object_type (stale data from a retired type) gets no
+  // chips rather than a thrown error — chips are a nicety, never load-bearing.
+  const chips = parsed.success ? starterChipsFromPatchOps(buildObjectContract(parsed.data).patch_ops) : [];
+  starterChipsCache.set(objectType, chips);
+  return chips;
+};
+
 const chatSummary = (doc: ChatDoc) => ({
   chat_id: doc.chat_id,
   kind: doc.kind,
-  ...(doc.object_type ? { object_type: doc.object_type } : {}),
+  ...(doc.object_type
+    ? { object_type: doc.object_type, starter_chips: starterChipsForObjectType(doc.object_type) }
+    : {}),
   ...(doc.object_id ? { object_id: doc.object_id } : {}),
   title: doc.title,
   status: doc.status,
@@ -505,6 +539,31 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       case 'get_chat': {
         const doc = await loadChatDoc(chatStore, request.data.chat_id);
         if (!doc) return jsonResponse(404, { error: 'chat not found' });
+
+        // PCL-P1 (C-20) — THE APPROVAL HEARTBEAT. While this chat is parked on
+        // an approval card whose call holds an object lock, the open browser's
+        // own poll is what keeps that lock alive, so a human who takes longer
+        // than the 900 s lease to decide can still publish the patch they were
+        // shown. This is deliberately driven by the poll and not by a timer:
+        // close the tab and the heartbeat stops with it, and the lock lapses
+        // normally (an abandoned card must not hold an object hostage). It can
+        // only ever EXTEND a lock the pending call demonstrably still holds —
+        // a mismatched, stolen or already-expired token is refused by
+        // refreshObjectLock's own guard, so mutual exclusion is untouched.
+        // Best effort: a read poll never fails because of it.
+        // The ref check is pure and cheap, so an ordinary poll (no card, or a
+        // card whose call holds no lock) never even opens the object store.
+        if (pendingApprovalLockRefs(doc).length > 0) {
+          try {
+            await heartbeatPendingApprovalLocks(
+              (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore,
+              doc
+            );
+          } catch {
+            /* the poll's answer never depends on the heartbeat */
+          }
+        }
+
         const since = request.data.since_seq ?? 0;
         // W19 T19.5: resolve which editorial request this conversation is
         // about — on the FIRST poll only. The client holds it for the session,
@@ -658,6 +717,9 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           ...(request.data.origin?.selection && doc.kind === 'free'
             ? { selection: request.data.origin.selection }
             : {}),
+          // PCL-P4: the chip key rides straight through — no server-side
+          // preference to reconcile, unlike request_id/selection above.
+          ...(request.data.origin?.starter ? { starter: request.data.origin.starter } : {}),
         };
 
         const governanceStore = await getGovernanceBlobStore(event, binding);
@@ -1015,5 +1077,4 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. T11.6: threads dataRoot to the publish path. */
-export const createHandler = (binding: SiteBinding) =>
-  withServerTiming('admin-agent-chat', buildHandlerImpl(binding));
+export const createHandler = (binding: SiteBinding) => withServerTiming('admin-agent-chat', buildHandlerImpl(binding));

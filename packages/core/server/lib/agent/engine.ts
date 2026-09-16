@@ -272,7 +272,10 @@ export const originAllowedAtRev = (rev: unknown): boolean =>
  */
 export const buildTurnOrigin = (doc: ChatDoc, run: ChatRun): TurnOrigin | undefined => {
   const rest = {
-    ...(doc.origin_starter ? { starter: doc.origin_starter } : {}),
+    // PCL-P4: a chip can attach on any send while the transcript is still
+    // empty, not only at chat creation — the run's own key (this send) wins
+    // over the doc's (the chat's creation-time surface, immutable after).
+    ...(run.origin_starter || doc.origin_starter ? { starter: run.origin_starter ?? doc.origin_starter } : {}),
     ...(run.origin_request_id ? { request_id: run.origin_request_id } : {}),
     ...(run.origin_run_id ? { run_id: run.origin_run_id } : {}),
     // Constraint 7's sibling: an object chat already sends the pair as

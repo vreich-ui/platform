@@ -355,8 +355,13 @@ export function AgentRail({
             <ChatComposer
               status={chat.status}
               busy={chat.busy}
-              onSend={(text) => void chat.send(text, agentFocus ?? focus, testMode)}
+              onSend={(text, origin) => void chat.send(text, agentFocus ?? focus, testMode, origin)}
               onCancel={() => void chat.cancel()}
+              // PCL-P4: a running start for the FIRST message only — once the
+              // transcript has anything in it, the object's real capabilities
+              // are better explored by asking than by re-showing the same
+              // opening chips.
+              chips={chat.events.length === 0 ? chat.starterChips : undefined}
               suggestions={suggestions}
               contextActions={contextActions}
               draftSeed={draftSeed}

@@ -42,11 +42,19 @@ export interface ChatCreateOrigin {
   starter?: string;
 }
 
-/** What a SEND knows: the job this turn is about, and the dock's selection when the chat is not object-bound. */
+/**
+ * What a SEND knows: the job this turn is about, the dock's selection when
+ * the chat is not object-bound, and (PCL-P4) the starter chip key the
+ * composer's text still traces back to, when it does. Unlike `surface`
+ * (`ChatCreateOrigin`, stamped once at chat creation and immutable after), a
+ * chip can be clicked on ANY send while the transcript is still empty, so its
+ * key rides the per-send half and is frozen onto the RUN, not the chat doc.
+ */
 export interface ChatSendOrigin {
   request_id?: string;
   run_id?: string;
   selection?: ChatOriginSelection;
+  starter?: string;
 }
 
 /**
@@ -134,6 +142,7 @@ export const chatSendOrigin = (parts: ChatSendOrigin | undefined): ChatSendOrigi
     ...(parts.selection?.object_type && parts.selection?.object_id
       ? { selection: { object_type: parts.selection.object_type, object_id: parts.selection.object_id } }
       : {}),
+    ...(parts.starter ? { starter: parts.starter } : {}),
   };
   return Object.keys(origin).length > 0 ? origin : undefined;
 };

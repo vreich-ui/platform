@@ -7,6 +7,9 @@ import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { CandidateSetView } from './candidate-choice.js';
 import type { Blockage } from './blockage.js';
 import type { ChatCreateOrigin, ChatSendOrigin } from './chat-origin.js';
+import type { StarterChip } from './starter-chips.js';
+
+export type { StarterChip } from './starter-chips.js';
 
 const ENDPOINT = '/.netlify/functions/admin-agent-chat';
 
@@ -84,6 +87,13 @@ export interface ChatSummaryView {
   updated_at: string;
   last_outcome: RunSummaryView | null;
   agent?: AgentView;
+  /**
+   * PCL-P4 — composer starter chips for this chat's bound object type,
+   * present only on an object-kind chat (`server/functions/admin-agent-chat.ts`'s
+   * `chatSummary`). Server-derived from the object type's real, enforced
+   * patch-op capabilities; the browser only renders this list, never invents it.
+   */
+  starter_chips?: StarterChip[];
 }
 
 /** W19 T19.5: the editorial request this conversation is about, resolved server-side on the first poll. */

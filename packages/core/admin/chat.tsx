@@ -33,6 +33,7 @@ import {
   type ChatView,
   type PendingView,
   type RunSummaryView,
+  type StarterChip,
 } from '@core/lib/admin/chat-client';
 import { chatSendOrigin, type ChatSendOrigin } from '@core/lib/admin/chat-origin';
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
@@ -79,6 +80,7 @@ import {
   presentPendingApproval,
 } from '@core/lib/admin/pending-approval';
 import { insertQuoteIntoDraft, selectionWithinContainer } from '@core/lib/admin/chat-quote';
+import { nextAttachedStarter } from '@core/lib/admin/starter-chips';
 import { findControlsSubmissionText, splitControlsSegments } from '@core/lib/admin/chat-controls';
 import { useDictation } from '@core/lib/admin/use-dictation';
 import { cmsAgentErrorCopy, type CmsAgentErrorDetail } from '@core/lib/admin/cms-agent-error-copy';
@@ -105,6 +107,12 @@ export interface UseChatState {
   agent: AgentView | undefined;
   /** W19 T19.5: the editorial request this conversation is about, once the server has resolved it. */
   request: ChatRequestBindingView | undefined;
+  /**
+   * PCL-P4 — composer starter chips for this chat's bound object type
+   * (absent on a free chat, or before the first poll lands). Server-derived
+   * from the type's real patch-op capabilities; see `ChatSummaryView.starter_chips`.
+   */
+  starterChips: StarterChip[] | undefined;
   /** T3.1 (D5): the most recent run's summary — carried on every `get_chat`
    *  response (`ChatSummaryView.last_outcome`) already, so the receipt tier
    *  and the ambient chip's `idle` reading need no new fetch. `null` means
@@ -118,7 +126,13 @@ export interface UseChatState {
   lastEventAtMs: number | undefined;
   error: string | undefined;
   busy: boolean;
-  send: (text: string, focus?: string, testMode?: boolean) => Promise<void>;
+  /**
+   * PCL-P4: `starter` is the chip key the composer's text still traces back
+   * to, or `undefined` for an ordinary message — see `ChatComposer`'s
+   * `onSend`. Threaded to `sendChatMessage`'s `origin.starter`
+   * (CHAT-ORIGIN's per-send half, `chat-origin.ts`) by `currentSendOrigin`.
+   */
+  send: (text: string, focus?: string, testMode?: boolean, starter?: string) => Promise<void>;
   preview: (candidateId: string | undefined) => void;
   chooseCandidate: (candidateId: string) => Promise<void>;
   rejectCandidates: (reason: string) => Promise<void>;
@@ -176,6 +190,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined, sendOrig
   const [previewCandidateId, setPreviewCandidateId] = useState<string | undefined>(undefined);
   const [agent, setAgent] = useState<AgentView | undefined>(undefined);
   const [request, setRequest] = useState<ChatRequestBindingView | undefined>(undefined);
+  const [starterChips, setStarterChips] = useState<StarterChip[] | undefined>(undefined);
   const [lastOutcome, setLastOutcome] = useState<RunSummaryView | null | undefined>(undefined);
   const [lastEventAtMs, setLastEventAtMs] = useState<number | undefined>(undefined);
   /** Read inside `poll`'s closure, which must not re-create on every binding change. */
@@ -217,6 +232,11 @@ export function useChat(getToken: GetToken, chatId: string | undefined, sendOrig
         : undefined
     );
     if (view.agent) setAgent(view.agent);
+    // Present on EVERY poll of an object-kind chat (unlike `request`, which
+    // is resolved once) — a type's real capabilities do not change mid-chat,
+    // but there is no reason to special-case "first poll only" for a field
+    // this cheap to just keep setting from the server's own answer.
+    setStarterChips(view.starter_chips);
     // Sent on the first poll only; keep it for the rest of the session.
     if (view.request) {
       requestRef.current = view.request;
@@ -294,6 +314,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined, sendOrig
     setRequest(undefined);
     requestRef.current = undefined;
     chatKindRef.current = undefined;
+    setStarterChips(undefined);
     setLastOutcome(undefined);
     setLastEventAtMs(undefined);
     claimRef.current = createApprovalClaim();
@@ -316,8 +337,13 @@ export function useChat(getToken: GetToken, chatId: string | undefined, sendOrig
    * chat — that pair rides `context.object_type`/`object_id` already, and
    * repeating it would read as a new pick. The server enforces the same rule;
    * this is the cheap half of it, one round trip earlier.
+   *
+   * PCL-P4: `starter` is the ONE piece of this the host does not know —
+   * `ChatComposer` resolves it itself from its own `attachedStarter` state at
+   * the moment of Send, and passes it here rather than through
+   * `sendOriginRef` (which is set once per render, not per keystroke).
    */
-  const currentSendOrigin = useCallback(() => {
+  const currentSendOrigin = useCallback((starter?: string) => {
     const host = sendOriginRef.current ?? {};
     // The binding wins over the host's guess for the request id: same fact,
     // resolved server-side. The selection is dropped whole for an object chat.
@@ -326,6 +352,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined, sendOrig
       ...(requestId ? { request_id: requestId } : {}),
       ...(host.run_id ? { run_id: host.run_id } : {}),
       ...(host.selection && chatKindRef.current !== 'object' ? { selection: host.selection } : {}),
+      ...(starter ? { starter } : {}),
     });
   }, []);
 
@@ -407,14 +434,15 @@ export function useChat(getToken: GetToken, chatId: string | undefined, sendOrig
     previewCandidate: candidateSet?.candidates.find((candidate) => candidate.candidate_id === previewCandidateId),
     agent,
     request,
+    starterChips,
     lastOutcome,
     lastEventAtMs,
     error,
     busy,
     writeStamp,
     pendingConsumed: pending !== undefined && claimRef.current.has(pending.call_id),
-    send: (text, focus, testMode) =>
-      wrap(() => sendChatMessage(getToken, chatId!, text, focus, testMode, currentSendOrigin())),
+    send: (text, focus, testMode, starter) =>
+      wrap(() => sendChatMessage(getToken, chatId!, text, focus, testMode, currentSendOrigin(starter))),
     preview: setPreviewCandidateId,
     chooseCandidate: (candidateId) => {
       const callId = candidateSet?.call_id;
@@ -720,7 +748,10 @@ function JsonDisclosure({ label, value }: { label: string; value: unknown }) {
  * and a pre-existing chat document's events, which only ever carried a
  * precomposed `message` string and no `code` at all.
  */
-function runErrorCopy(detail: Record<string, unknown> | undefined, isOwner: boolean): { text: string; providerDetail?: string } {
+function runErrorCopy(
+  detail: Record<string, unknown> | undefined,
+  isOwner: boolean
+): { text: string; providerDetail?: string } {
   const code = typeof detail?.code === 'string' ? detail.code : undefined;
   if (!code) return { text: String(detail?.message ?? 'unknown error') };
   const error: CmsAgentErrorDetail = {
@@ -1812,6 +1843,7 @@ export function ChatComposer({
   busy,
   onSend,
   onCancel,
+  chips,
   suggestions,
   contextActions,
   draftSeed,
@@ -1822,8 +1854,25 @@ export function ChatComposer({
 }: {
   status: ChatStatus | undefined;
   busy: boolean;
-  onSend: (text: string) => void;
+  /**
+   * PCL-P4: `starter` (a chip's `key`, never its label/prompt text) is passed
+   * ONLY when the text on screen at Send time is still, in full, the chip's
+   * own prompt untouched, or an edit of it that never passed through empty —
+   * see the `attachedStarter` state below for exactly which edits keep the
+   * attribution and which drop it. A message that never came from a chip
+   * carries no `starter` at all, never a best-guess one. The caller
+   * (`useChat`'s `send`) rides it onto `sendChatMessage`'s `origin.starter`.
+   */
+  onSend: (text: string, starter?: string) => void;
   onCancel?: () => void;
+  /**
+   * PCL-P4 — starter chips for the FIRST message of an object-bound chat.
+   * Server-derived (`StarterChip[]`, `lib/admin/starter-chips.ts`) from the
+   * bound object's real capabilities; a caller decides WHEN to show them
+   * (typically "no events yet") and just passes the list through. A chip
+   * FILLS the composer — see `onSend`'s doc — it never sends by itself.
+   */
+  chips?: StarterChip[];
   suggestions?: string[];
   contextActions?: Array<{ id: string; label: string; text: string }>;
   draftSeed?: { key: string; text: string };
@@ -1852,6 +1901,25 @@ export function ChatComposer({
   runMode?: React.ReactNode;
 }) {
   const [text, setText] = useState('');
+  /**
+   * PCL-P4 — which chip (by key) the text on screen still traces back to,
+   * or `undefined` for an ordinary draft. Lifetime policy (rule 1's "decide
+   * what happens on a wholesale overwrite"):
+   *   - A chip click sets it, and fills the composer with the chip's prompt.
+   *   - Typing, cutting, or pasting WITHIN a non-empty draft keeps it — the
+   *     editor is still working from the chip's start, however much they've
+   *     changed it.
+   *   - Clearing the composer to fully empty drops it. Emptying is the one
+   *     unambiguous "I'm done with that start" signal a plain onChange can
+   *     read; anything typed after is a fresh, unattributed message. This
+   *     does not catch a select-all-and-paste that never passes through
+   *     empty — a known, accepted gap, not a silent one.
+   *   - Any OTHER thing that fills the box wholesale (a quick-context chip,
+   *     a legacy suggestion chip, an inbound `draftSeed`) drops it too: those
+   *     are different origins, and none of them should read as "the editor
+   *     used a starter chip".
+   */
+  const [attachedStarter, setAttachedStarter] = useState<string | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
   const dictation = useDictation({
@@ -1868,7 +1936,10 @@ export function ChatComposer({
   const live =
     status === 'queued' || status === 'running' || status === 'awaiting_approval' || status === 'awaiting_candidate';
   useEffect(() => {
-    if (draftSeed) setText(draftSeed.text);
+    if (draftSeed) {
+      setText(draftSeed.text);
+      setAttachedStarter((current) => nextAttachedStarter(current, { type: 'overwrite' }));
+    }
   }, [draftSeed]);
   useEffect(() => {
     if (!quote) return;
@@ -1888,12 +1959,33 @@ export function ChatComposer({
     const trimmed = text.trim();
     if (!trimmed || live || busy) return;
     dictation.stop();
-    onSend(trimmed);
+    onSend(trimmed, attachedStarter);
     setText('');
+    setAttachedStarter((current) => nextAttachedStarter(current, { type: 'sent' }));
+  };
+  const handleChipClick = (chip: StarterChip) => {
+    setText(chip.prompt);
+    setAttachedStarter((current) => nextAttachedStarter(current, { type: 'chip', key: chip.key }));
+    requestAnimationFrame(() => textareaRef.current?.focus());
   };
   return (
     <div className="flex flex-col gap-1.5">
       {above}
+      {!live && chips && chips.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              aria-pressed={attachedStarter === chip.key}
+              className="adm-focusable rounded-full border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2.5 py-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] hover:border-[var(--adm-accent)] hover:text-[var(--adm-text)]"
+              onClick={() => handleChipClick(chip)}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {!live && contextActions && contextActions.length > 0 ? (
         <div>
           <p className="mb-1.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)]">
@@ -1905,7 +1997,10 @@ export function ChatComposer({
                 key={action.id}
                 type="button"
                 className="adm-focusable rounded-full border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2.5 py-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] hover:border-[var(--adm-accent)] hover:text-[var(--adm-text)]"
-                onClick={() => setText(action.text)}
+                onClick={() => {
+                  setText(action.text);
+                  setAttachedStarter((current) => nextAttachedStarter(current, { type: 'overwrite' }));
+                }}
               >
                 {action.label}
               </button>
@@ -1920,7 +2015,10 @@ export function ChatComposer({
               key={suggestion}
               type="button"
               className="adm-focusable rounded-full border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2.5 py-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] hover:border-[var(--adm-accent)] hover:text-[var(--adm-text)]"
-              onClick={() => setText(suggestion)}
+              onClick={() => {
+                setText(suggestion);
+                setAttachedStarter((current) => nextAttachedStarter(current, { type: 'overwrite' }));
+              }}
             >
               {suggestion}
             </button>
@@ -1950,7 +2048,11 @@ export function ChatComposer({
         <Textarea
           ref={textareaRef}
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            setText(next);
+            setAttachedStarter((current) => nextAttachedStarter(current, { type: 'edit', nextText: next }));
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Escape' && dictation.listening) {
               event.preventDefault();
