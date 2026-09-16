@@ -17,7 +17,7 @@ import '../../sites/drlurie/config/policy-bindings.js'; // W11: register site pr
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runMediaCompactionSweep, ORPHAN_GRACE_MS } from '../../packages/core/server/functions/media-compaction-sweep.js';
+import { runMediaCompactionSweep, ORPHAN_GRACE_MS } from '../../packages/core/server/lib/media-compaction-run.js';
 import { requestArtifactReferenceKey } from '../../packages/core/server/lib/artifact-index.js';
 import { MEDIA_COMPACTION_HEARTBEAT_KEY } from '../../packages/core/server/lib/media-compaction-heartbeat.js';
 import { setNetlifyBlobsModuleForTesting } from '../../packages/core/server/lib/blob-store.js';
