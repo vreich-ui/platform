@@ -59,9 +59,11 @@ import {
   rejectPendingCandidates,
   startRun,
 } from '../lib/agent/loop.js';
+import { chatSnapshotRow } from '../lib/agent/chat-snapshot-store.js';
+import type { ChatSnapshotRow } from '../lib/agent/chat-snapshot-view.js';
 import {
   getAgentChatBlobStore,
-  listChatDocs,
+  readChatList,
   loadChatDoc,
   mintFreeChatId,
   appendChatEvent,
@@ -321,9 +323,9 @@ const triggerBackground = async (chatId: string, triggerToken: string): Promise<
 /** PF5: the only reasoning identity available to admin chat. The versioned
  *  ref is filled by CMS-Agent after its first successful resolution; the
  *  stable base ref keeps idle and historical chats truthful before then. */
-const clientManagerView = (doc: ChatDoc) => ({
+const clientManagerView = (row: ChatSnapshotRow) => ({
   name: 'Client Manager',
-  agent_ref: doc.run?.agent_ref ?? 'agt_client_manager',
+  agent_ref: row.agent_ref ?? 'agt_client_manager',
   engine: 'cms_agent' as const,
 });
 
@@ -348,18 +350,25 @@ const starterChipsForObjectType = (objectType: string): StarterChip[] => {
   return chips;
 };
 
-const chatSummary = (doc: ChatDoc) => ({
-  chat_id: doc.chat_id,
-  kind: doc.kind,
-  ...(doc.object_type
-    ? { object_type: doc.object_type, starter_chips: starterChipsForObjectType(doc.object_type) }
+/**
+ * M3.1: projected from a SNAPSHOT ROW, not a chat document, so `list_chats`
+ * and `create_chat`/`get_chat` cannot drift — the list reads rows from
+ * `snapshots/chats.json`, the other two project a row from the document they
+ * already hold. `starter_chips` and `agent` are re-derived here rather than
+ * stored (`chat-snapshot-view.ts` says why).
+ */
+const chatSummary = (row: ChatSnapshotRow) => ({
+  chat_id: row.chat_id,
+  kind: row.kind,
+  ...(row.object_type
+    ? { object_type: row.object_type, starter_chips: starterChipsForObjectType(row.object_type) }
     : {}),
-  ...(doc.object_id ? { object_id: doc.object_id } : {}),
-  title: doc.title,
-  status: doc.status,
-  updated_at: doc.updated_at,
-  last_outcome: doc.runs[doc.runs.length - 1] ?? null,
-  agent: clientManagerView(doc),
+  ...(row.object_id ? { object_id: row.object_id } : {}),
+  title: row.title,
+  status: row.status,
+  updated_at: row.updated_at,
+  last_outcome: row.last_outcome,
+  agent: clientManagerView(row),
 });
 
 /**
@@ -376,6 +385,20 @@ const migratedChatTools = async (
   const migrated = migrateAutonomyKeys(doc.chat_tools as Record<string, ToolAutonomy> | undefined);
   if (!migrated.changed) return doc.chat_tools as Record<string, ToolAutonomy> | undefined;
   const next: GovernanceDoc = { ...doc, chat_tools: migrated.map, chat_tools_migrated: true };
+  /**
+   * M3.4 note — deliberately NOT a `snapshots/governance.json` writer.
+   *
+   * Every other governance write refreshes that snapshot, because a person
+   * who changes a policy must read their own change back. This one changes no
+   * policy VALUE: it rewrites `chat_tools` KEYS into their canonical spelling
+   * (`patch` -> `object_patch`) and stamps `chat_tools_migrated`, once, on
+   * read. The snapshot keeps the pre-migration spelling for at most one probe
+   * pass, and the guardrails table already reads a row by its
+   * `canonical_name`, so nobody sees a wrong value in the meantime. The cost
+   * avoided is real: this function sits 30 KB under a hard bundle cap, and an
+   * import edge to the snapshot writer for a one-time key rewrite is the kind
+   * of quiet growth that cap exists to catch.
+   */
   await putGovernanceDoc(store, next).catch((error) => {
     console.error('governance chat_tools key migration write-back failed', error);
   });
@@ -480,7 +503,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           const existing = await loadChatDoc(chatStore, chatId);
           if (existing)
             return jsonResponse(200, {
-              chat: chatSummary(existing),
+              chat: chatSummary(chatSnapshotRow(existing)),
               existed: true,
             });
           const doc: ChatDoc = {
@@ -500,7 +523,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             runs: [],
           };
           await saveChatDoc(chatStore, doc);
-          return jsonResponse(200, { chat: chatSummary(doc), existed: false });
+          return jsonResponse(200, { chat: chatSummary(chatSnapshotRow(doc)), existed: false });
         }
         const doc: ChatDoc = {
           schema_version: 'agent-chat.v1',
@@ -517,22 +540,25 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           runs: [],
         };
         await saveChatDoc(chatStore, doc);
-        return jsonResponse(200, { chat: chatSummary(doc), existed: false });
+        return jsonResponse(200, { chat: chatSummary(chatSnapshotRow(doc)), existed: false });
       }
 
       case 'list_chats': {
         if (request.data.include_all && !isOwner(callerRoles)) {
           return jsonResponse(403, { error: 'Owner access required to list other administrators’ chats.' });
         }
-        const docs = await listChatDocs(chatStore);
-        const visibleDocs = visibleChatDocs(
-          docs,
+        // M3.1 — ONE blob read. `readChatList` falls through to the transcript
+        // sweep only when the snapshot cannot be trusted, and writes back what
+        // it rebuilt, so the next call is one read again.
+        const { rows } = await readChatList(chatStore);
+        const visibleRows = visibleChatDocs(
+          rows,
           caller.email,
           Boolean(request.data.include_all),
           isOwner(callerRoles)
         );
         return readJsonResponse(event, {
-          chats: visibleDocs.map((doc) => chatSummary(doc)),
+          chats: visibleRows.map((row) => chatSummary(row)),
         });
       }
 
@@ -577,7 +603,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             )
           : undefined;
         return readJsonResponse(event, {
-          ...chatSummary(doc),
+          ...chatSummary(chatSnapshotRow(doc)),
           ...(boundRequest
             ? {
                 request: {

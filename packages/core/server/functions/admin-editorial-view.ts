@@ -60,7 +60,7 @@ import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { loadReleaseOverview, ReleaseOverviewUnavailableError } from '../lib/release-overview.js';
 import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
-import { getAgentChatBlobStore, listChatDocs } from '../lib/agent/chat-store.js';
+import { getAgentChatBlobStore, readChatList } from '../lib/agent/chat-store.js';
 import { visibleChatDocs } from '../lib/agent/chat-visibility.js';
 import type { InventoryRow } from '../lib/object-inventory.js';
 import type { EditorialObjectState } from '../../lib/admin/editorial-state.js';
@@ -148,12 +148,14 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   const email = access.email;
 
   try {
-    // The chat scan is independent of the overview — issue them together.
-    const [overview, chatDocs] = await Promise.all([
+    // The chat read is independent of the overview — issue them together.
+    // M3.1: one blob read (`snapshots/chats.json`), not one transcript read
+    // per chat; the sweep runs here only when the snapshot cannot be trusted.
+    const [overview, chatRows] = await Promise.all([
       loadReleaseOverview(event, { userId: access.userId, email, roles: access.roles }, binding),
       (async () => {
         try {
-          return await listChatDocs(await getAgentChatBlobStore(event, binding));
+          return (await readChatList(await getAgentChatBlobStore(event, binding))).rows;
         } catch (error) {
           // The publication map is still worth painting without the "an agent
           // is working on this" line — the client already tolerated a failed
@@ -169,7 +171,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
     // Scoped exactly as `AdminHome`'s own `listChats(token)` was: the caller's
     // own chats, never `include_all`.
-    const visible = visibleChatDocs(chatDocs, email, false, false);
+    const visible = visibleChatDocs(chatRows, email, false, false);
     const workByObject = new Map<string, EditorialWorkView>();
     for (const doc of visible) {
       if (!doc.object_id || !LIVE_CHAT_STATUSES.has(doc.status)) continue;

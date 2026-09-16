@@ -27,7 +27,7 @@ import {
   type ClassifiedWarning,
   type Severity,
 } from '../../../lib/admin/activity-severity.js';
-import { nodeLabel } from '../../../lib/admin/request-logic.js';
+import { nodeLabel } from '../../../lib/admin/request-node-labels.js';
 import { parseBlockage, type Blockage } from '../../../lib/admin/blockage.js';
 import {
   derivePublication,

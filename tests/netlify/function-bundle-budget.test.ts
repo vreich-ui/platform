@@ -362,6 +362,81 @@ const BUDGETS_KB: Record<string, number> = {
   // `object-inventory.ts` — a function that LISTS PEOPLE has no business
   // carrying the inventory row projection, and it is there only because the
   // record-write choke point owes the index a row.
+  //
+  // M3.2 (2026-09-16) added `snapshots/members.json` and did NOT raise this
+  // cap, which is the whole story: the three new modules
+  // (`snapshots/guarded-doc.ts`, `membership/snapshot-view.ts`,
+  // `membership/snapshot-store.ts`) are +18 KB on a function that had 17 KB of
+  // room, so the raise this would have forced was paid for with a cut instead.
+  //
+  // The cut is `lib/admin/display-name-core.ts`. `objectDisplayName` is reached
+  // from `object-inventory.ts` through the record-write choke point and
+  // `friendlyNameFromEmail` from three membership modules, so every admin
+  // function that writes an object record or names a person was carrying the
+  // whole SCREEN vocabulary with them — the status and navigation label tables,
+  // `principalName`, `idTooltip` and the hundred-line `VERB_PHRASES` history
+  // table, nine kilobytes of copy for views these functions never render.
+  // `display-name.ts` re-exports every moved name, so no client call site
+  // changed; the five server importers take the leaf spelling. Worth -9 KB here
+  // and the same on `admin-shell` (476), `admin-requests` (353) and
+  // `admin-auth-state` (229). Measured after both: 516 KB / 56 modules.
+  //
+  // IF YOU TRIP THIS NEXT: check first that no server module has gone back to
+  // `lib/admin/display-name.js` for `objectDisplayName` or
+  // `friendlyNameFromEmail`. Either spelling compiles and either silently
+  // re-adds 9 KB; only the `-core` leaf is on the diet. The cut this file has
+  // named since M0.1 — `projectIndexEntry`'s edge to `object-inventory.ts` — was
+  // examined again here and is NOT available: `inventoryRowFromRecord` needs
+  // essentially the whole of that module (the recipe and content summaries, the
+  // score digest, the lock state), so extracting it moves ~13 KB of source into
+  // a new file rather than out of this bundle.
+  //
+  // M3.3 (2026-09-16) STAYS UNDER the cap — no raise — at 517.9 KB / 54 modules,
+  // up from 502.6 / 53. The new module is `visual-identity/snapshot-doc.ts`,
+  // the second alarm-guarded projection the record-write choke point maintains,
+  // and this function reaches it exactly as it reaches the first: through
+  // `membership/offboarding.ts` -> `record-writer.ts`, which can force a lock
+  // off a `template` as easily as off a page. Three things kept it under:
+  // `object-inventory-row.ts` (the cut the note above has been naming — the
+  // filter/sort/detail half of `object-inventory.ts` is no longer in this
+  // graph), reusing `index-doc.ts`'s `readDocBlob`/`usableEtag`/store type
+  // instead of copying the alarm plumbing, and keeping the long-form rationale
+  // in `visual-identity/snapshot-store.ts`, which this function never imports.
+  // 2 KB of headroom is thin: the next change here should expect to pay the
+  // edge this function's own entry point carries, `artifact-soft-delete.ts` +
+  // `artifact-trust.ts` — 78 KB of artifact machinery on a function that lists
+  // people — before it pays another number.
+  //
+  // INTEGRATE (wave 2, 2026-09-16). The two numbers above were measured on two
+  // branches that did not yet know about each other. On the INTEGRATED tree
+  // they add up and the cap busts at 531.2 KB / 57 modules, which is the whole
+  // point of measuring here rather than on a branch. No raise; two cuts, both
+  // the leaf-spelling kind this note keeps describing:
+  //
+  //  1. `MAJOR_KEY_ARTIFACT_REF_RE`. The entry point took it from
+  //     `lib/artifact-trust.ts`, which only RE-EXPORTS it — it has lived in the
+  //     leaf `packages/core/lib/artifact-paths.ts` since 2026-09-16, because
+  //     `Logo.astro` needs it at Astro build time and cannot load Netlify
+  //     Blobs. Taking the re-export dragged `artifact-index.ts` for one regex.
+  //     -5.7 KB. (This is HALF of the named 78 KB cut: the other half,
+  //     `artifact-soft-delete.ts` -> `artifact-index.ts`/`artifacts.ts`, is NOT
+  //     available — that module genuinely reads and rewrites the reference and
+  //     its pointers, and it is already the leaf mutation T2.1 extracted.)
+  //  2. `lib/oauth-subject-index.ts`, a new leaf. `membership/offboarding.ts`
+  //     needs `subjectIndexPrefix`, `subjectIndexEntrySchema` and the store
+  //     type to revoke a removed person's grants, and took them from
+  //     `oauth-store.ts` — 27 KB of token minting, hashing, rotation and
+  //     family revocation that this function can never execute, loaded before
+  //     a handler that LISTS PEOPLE runs its first line. -24 KB.
+  //
+  // Measured on the integrated tree: 499.2 KB / 56 modules. 20 KB of headroom,
+  // which is the first real room this function has had since M0.1.
+  //
+  // IF YOU TRIP THIS NEXT: the same trap as `display-name.js` above, twice
+  // over. `from './artifact-trust.js'` for `MAJOR_KEY_ARTIFACT_REF_RE` and
+  // `from './oauth-store.js'` for anything by-subject both compile and both
+  // silently re-add their subtree; only `lib/artifact-paths.ts` and
+  // `lib/oauth-subject-index.ts` are on the diet.
   'admin-users': 520,
   // Ratchet only; see the header note.
   //
@@ -464,6 +539,42 @@ const BUDGETS_KB: Record<string, number> = {
   // consecutive raises on <=3 KB, so the next change here is not forced into
   // another number; the `agent/tools.ts` definitions-vs-executors cut this file
   // has been naming since A4 is still the debt to pay.
+  //
+  // M3.1 (2026-09-16) added `snapshots/chats.json` and did NOT raise this cap
+  // either. Five modules join this graph — the two chat snapshot halves, the two
+  // membership ones (reached through `users-store.ts`) and the shared
+  // `snapshots/guarded-doc.ts` — for +28 KB against 30 KB of room, after the
+  // `display-name-core.ts` cut described above paid back 8 KB of it. Measured
+  // 3676 KB / 279 modules. The `agent/tools.ts` definitions-vs-executors cut
+  // this file has been naming since A4 is still the debt to pay, and the next
+  // change here should expect to pay it rather than ask for a number.
+  //
+  // M3.3 (2026-09-16) stays under it too: 3668 KB / 276 modules, up from
+  // 3649.8 / 274. Two new first-party files, `visual-identity/snapshot-doc.ts`
+  // and `object-inventory-row.ts`, both reached through `object-verbs.ts` ->
+  // `objects/record-writer.ts`, which this graph already carried. No new edge
+  // and no new subtree; the rebuild half (`visual-identity/snapshot-store.ts`)
+  // is NOT here, because only the read path imports it.
+  //
+  // INTEGRATE (wave 2, 2026-09-16). Same story as `admin-users`: +28 and +18
+  // measured separately are +65 together (M3.4's governance snapshot halves
+  // join through `genesis-policy-verbs.ts`), and the integrated tree busts at
+  // 3714.7 KB / 284 modules. No raise. The cut is `lib/admin/request-logic.ts`
+  // — 51 KB, 63 with its exclusive subtree — which three SERVER modules were
+  // pulling in for two small things that already had leaves, or should have:
+  //
+  //  - `agent/context.ts` took `filterRequestRows`/`sortRequestRows` from it,
+  //    when M2.1 had already split them into `lib/admin/request-list-order.ts`
+  //    for exactly this reason and `request-logic.ts` merely re-exports them.
+  //  - `agent/tools.ts` and `requests/activity.ts` took `nodeLabel`, a
+  //    thirty-line id->phrase table, now in the leaf
+  //    `lib/admin/request-node-labels.ts` and re-exported from `request-logic.ts`.
+  //
+  // What those three edges were dragging is the admin SCREEN vocabulary — row
+  // actions and their rights, quick filters, publish-policy refusal sentences,
+  // empty states, notification scanning — into functions that render no screen.
+  // Measured on the integrated tree: 3657.7 KB / 283 modules, 22 KB of room.
+  // The `agent/tools.ts` definitions-vs-executors cut is STILL the debt.
   'admin-agent-chat': 3680,
 };
 

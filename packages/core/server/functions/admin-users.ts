@@ -28,7 +28,7 @@ import {
   type UserRecord,
   type UsersBlobStore,
 } from '../lib/users-store.js';
-import { MAJOR_KEY_ARTIFACT_REF_RE } from '../lib/artifact-trust.js';
+import { MAJOR_KEY_ARTIFACT_REF_RE } from '../../lib/artifact-paths.js';
 import { acceptInvitation, previewInvitationByToken, type GoTrueIdentity } from '../lib/membership/invitations.js';
 import { appendAudit, stampOnboarding } from '../lib/membership/write.js';
 import { auditActorFromPrincipal, personIdForEmail } from '../lib/membership/store.js';
@@ -44,7 +44,7 @@ import { handleMembershipVerb } from '../lib/membership/verbs.js';
  */
 import { resolveMeSection, synthesizedRecord } from '../lib/membership/session.js';
 import { getNetlifyBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
-import type { OAuthBlobStore } from '../lib/oauth-store.js';
+import type { OAuthBlobStore } from '../lib/oauth-subject-index.js';
 import { softDeleteArtifactReference } from '../lib/artifact-soft-delete.js';
 import type { Principal } from '../../schema/object-record-v1.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';

@@ -41,7 +41,7 @@ import { IconExternalLink, IconPalette, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import type { EditorialAssetsPayload } from '@core/lib/admin/editorial-assets';
 import type { StudioRecord } from '@core/lib/admin/studio-client';
-import { fetchStudioData } from '@core/lib/admin/studio-client';
+import { fetchStudioData, invalidateStudioCache } from '@core/lib/admin/studio-client';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { fetchGovernance } from '@core/lib/admin/governance-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
@@ -89,24 +89,27 @@ async function fetchSite(siteId: string, signal?: AbortSignal): Promise<StudioRe
 }
 
 /**
- * The `visual_standard` collection (house + templates) through the SAME
- * `admin-object` verbs every other admin read uses — list, then one parallel
- * `get` per id, exactly `studio-client`'s shape. A tenant that predates the
- * type (or an unavailable store) yields an empty list rather than failing the
- * whole page: the identity tab must still paint.
+ * M3.3 — the `visual_standard` collection, from the SAME fetch the theme set
+ * comes from.
+ *
+ * This used to be a second copy of `studio-client`'s `loadType`: a `list`,
+ * then one parallel `get` per id, over `admin-object`. Between the two of them
+ * this page issued seventeen invocations for four types' bodies. They are one
+ * blob now (`snapshots/visual-identity.json`, maintained by the record-write
+ * choke point), `studio-client` reads it, and the two resources below that ask
+ * for it on mount share ONE request through that module's in-flight de-dup.
+ *
+ * The tolerance this function had is kept where the tolerance belongs — a
+ * tenant that predates the type, or an unavailable store, yields an empty
+ * collection rather than failing the whole page, because the identity tab must
+ * still paint.
  */
-async function fetchVisualStandards(signal?: AbortSignal): Promise<StudioRecord[]> {
-  const listed = await callObjectVerb(getToken, { action: 'list', object_type: 'visual_standard' }, signal);
-  if (listed.status !== 200 || !Array.isArray(listed.body.objects)) return [];
-  const ids = (listed.body.objects as Array<{ object_id?: string }>)
-    .map((row) => row.object_id)
-    .filter((id): id is string => Boolean(id));
-  const records = await Promise.all(
-    ids.map((id) => callObjectVerb(getToken, { action: 'get', object_type: 'visual_standard', object_id: id }, signal))
-  );
-  return records
-    .filter((result) => result.status === 200 && result.body.record)
-    .map((result) => result.body.record as StudioRecord);
+async function fetchVisualStandards(): Promise<StudioRecord[]> {
+  try {
+    return (await fetchStudioData(getToken)).standards;
+  } catch {
+    return [];
+  }
 }
 
 /** The guardrail is Owner-read too; an unreadable one is reported as the default. */
@@ -689,8 +692,8 @@ function VisualIdentityBody({
     const studio = await fetchStudioData(getToken);
     return studio.themes;
   });
-  const standardsResource = useCachedResource<StudioRecord[]>('visual-identity:standards', (signal) =>
-    fetchVisualStandards(signal)
+  const standardsResource = useCachedResource<StudioRecord[]>('visual-identity:standards', () =>
+    fetchVisualStandards()
   );
   const assetsResource = useCachedResource<EditorialAssetsPayload>('visual-identity:assets', () =>
     fetchEditorialAssets(getToken)
@@ -714,6 +717,12 @@ function VisualIdentityBody({
    * closure without re-firing on every render.
    */
   const load = useCallback(() => {
+    // M3.3: the theme set and the standards now come from `studio-client`'s
+    // TTL cache, so a refresh that did not clear it would re-serve the state
+    // the write just changed — a mood-board save, an imagery apply, a finished
+    // chat run. Studio.tsx's mutating verbs already invalidate here for the
+    // same reason; this page mutates the same records and must too.
+    invalidateStudioCache();
     siteResource.refresh();
     themesResource.refresh();
     standardsResource.refresh();

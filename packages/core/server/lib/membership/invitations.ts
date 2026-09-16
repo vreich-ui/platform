@@ -32,7 +32,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 import type { MembershipPolicy } from '../../../lib/membership-policy.js';
-import { friendlyNameFromEmail } from '../../../lib/admin/display-name.js';
+import { friendlyNameFromEmail } from '../../../lib/admin/display-name-core.js';
 import { getMembershipByEmail, listMembers, type Member } from './read.js';
 import {
   KEYS,

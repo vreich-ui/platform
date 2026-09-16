@@ -49,14 +49,25 @@ import { IconBookmark, IconChartBar, IconChevronDown, IconDownload, IconNote, Ic
 import { cn } from './utils';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { useCachedResource } from '@core/lib/admin/use-cached-resource';
-import { fetchAnalyticsOverview, type AnalyticsOverview } from '@core/lib/admin/analytics-client';
-import { fetchOwnAnalyticsOverview, type OwnAnalyticsOverview } from '@core/lib/admin/own-analytics-client';
+import type { AnalyticsOverview } from '@core/lib/admin/analytics-client';
+import type { OwnAnalyticsOverview } from '@core/lib/admin/own-analytics-client';
+// M4: the page's one call on mount. The per-resource clients above are still
+// the contract each panel renders against — they are simply no longer what
+// fetches, except for the writes (`?resource=views`, `?resource=notes`) below.
+import {
+  analyticsBootKey,
+  bootMarkers,
+  bootNetlify,
+  bootOwn,
+  bootPartError,
+  fetchAnalyticsBoot,
+  isBootPartError,
+  type AnalyticsBoot,
+} from '@core/lib/admin/analytics-boot-client';
 import { resolveOwnAnalyticsPanel, type ObjectRowsSort } from '@core/lib/admin/own-analytics-logic';
 import {
   addAnalyticsNoteRequest,
   deleteAnalyticsViewRequest,
-  fetchAnalyticsViews,
-  fetchAnnotationMarkers as fetchAnnotationMarkersRequest,
   saveAnalyticsViewRequest,
 } from '@core/lib/admin/analytics-views-client';
 import {
@@ -931,10 +942,11 @@ function AnalyticsPanel({
 // ─── own tracker tab (T21.2b — the first-party feed) ────────────────────────
 
 function OwnAnalyticsTab({
-  rangeKey,
-  custom,
+  overview,
+  loading,
+  error,
+  refreshing,
   windowResult,
-  windowKey,
   filters,
   compare,
   pagesSort,
@@ -947,10 +959,13 @@ function OwnAnalyticsTab({
   markers,
   onPanelChange,
 }: {
-  rangeKey: AnalyticsRangeKey;
-  custom: CustomRangeInput | undefined;
+  /** M4 — from the page's one `?resource=boot` call; `null` while loading or when that part degraded. */
+  overview: OwnAnalyticsOverview | null;
+  loading: boolean;
+  error: string | null;
+  /** A value is on screen and the boot read is revalidating behind it — the quiet chip, never a skeleton. */
+  refreshing: boolean;
   windowResult: DateWindowResult;
-  windowKey: string | null;
   filters: AnalyticsFilters;
   compare: boolean;
   /** R11.1 — a saved view's alternate Pages-card sort. Absent = the page's normal default. */
@@ -969,31 +984,18 @@ function OwnAnalyticsTab({
   /** R11.2 — lifts the resolved panel up to the page header's "Export report" action, which needs it regardless of which tab is scrolled into view. */
   onPanelChange?: (state: AnalyticsPanelState) => void;
 }) {
-  const filterKey = JSON.stringify(filters);
-
   /**
-   * T5.2 — the own feed as a cached per-panel resource.
+   * M4 — the own feed arrives as a PROP, from the page's one `?resource=boot`
+   * call, exactly as the Netlify tab below has always taken its overview.
    *
-   * The fetch shape is unchanged; what changed is what a viewer sees while it
-   * runs. The key carries everything the request varies on (`windowKey` is
-   * the resolved-window signal, `filterKey` the stable form of `filters`), so
-   * returning to a window this tab has already shown paints its KPIs and
-   * charts synchronously with a `RefreshingChip` instead of the five-card
-   * skeleton, and a failed revalidation leaves the numbers that are already
-   * on screen exactly where they are.
+   * It used to own a `useCachedResource` of its own, keyed
+   * `analytics:own:${windowKey}:${filterKey}`. That key could never hit —
+   * `windowKey` is `${window.from}:${window.to}` with `to = Date.now()` to the
+   * millisecond — so the cache it looked like it had was a skeleton on every
+   * mount, and the invocation it cost was one of four on a page whose data is
+   * now blob reads. The two tabs are symmetric again: neither fetches, the
+   * page fetches once.
    */
-  const resource = useCachedResource<OwnAnalyticsOverview>(
-    `analytics:own:${windowKey ?? 'invalid'}:${filterKey}`,
-    // `rangeKey`/`custom` are captured by value at fetch time, which is
-    // correct since they only ever change in lockstep with `windowKey`.
-    () => fetchOwnAnalyticsOverview(getToken, { range: rangeKey, custom, filters }),
-    undefined,
-    { enabled: windowResult.ok }
-  );
-  const overview = resource.value ?? null;
-  const loading = resource.loading;
-  const error = resource.value ? null : (resource.error ?? null);
-
   const panel = useMemo(
     () =>
       resolveOwnAnalyticsPanel({
@@ -1022,7 +1024,7 @@ function OwnAnalyticsTab({
         suppress it.
       </p>
       <FilterChips filters={filters} onRemove={onFilterRemove} />
-      <RefreshingChip active={resource.refreshing} />
+      <RefreshingChip active={refreshing} />
       <AnalyticsPanel
         state={panel}
         notConfiguredTitle="Own tracker isn't connected"
@@ -1367,19 +1369,10 @@ function AnalyticsBody({ identity }: { identity: SiteIdentity }) {
    */
   const [addedNote, setAddedNote] = useState<{ key: string; markers: AnnotationMarker[] }>({ key: '', markers: [] });
 
-  useEffect(() => {
-    let alive = true;
-    fetchAnalyticsViews(getToken)
-      .then((result) => {
-        if (alive) setViews(result);
-      })
-      .catch(() => {
-        // The Views menu degrades to "no saved views" rather than blocking the page — the KPI/chart data is the load-bearing content here.
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // M4: the saved-views list arrives with `?resource=boot` (see the boot
+  // resource below), so this page no longer spends an invocation of its own on
+  // it. The `?resource=views` endpoint and `fetchAnalyticsViews` stay — they
+  // are what a save and a delete still round-trip through.
 
   // Hydrate from the URL (primary, D1: "?source= persists in the URL") on
   // mount, falling back to the last-remembered RANGE in localStorage when
@@ -1597,60 +1590,72 @@ function AnalyticsBody({ identity }: { identity: SiteIdentity }) {
   // fails validation, e.g. clearing one field mid-edit, does not re-fetch).
   const windowKey = windowResult.ok ? `${windowResult.window.from}:${windowResult.window.to}` : null;
 
-  // The Netlify feed is fetched regardless of which tab is active: the own
-  // tab's footer needs its pageviews for the capture-rate stat (D9), so
-  // there is no tab-switch saving to be had here — this matches the
-  // pre-R6.1 behavior exactly. The OWN feed, by contrast, is only fetched
-  // while its tab is mounted (`Tabs` unmounts the inactive panel's content),
-  // which is new: parking on the Netlify tab no longer pays for a sink call
-  // nobody is looking at.
   /**
-   * T5.2 — the Netlify feed as a cached per-panel resource, keyed by the
-   * resolved window. Same request, same degradation; what changes is that a
-   * window this page has already shown repaints synchronously instead of
-   * blanking to the skeleton, and a failed revalidation leaves the numbers
-   * on screen. `enabled` is the old effect's `hydrated`/`windowResult.ok`
-   * guard — a disabled resource still paints what it has cached, it just
-   * does not go to the network until the URL has been read and the window
-   * resolves.
+   * M4 — ONE call on mount.
+   *
+   * This replaces three `useCachedResource`s and one `useEffect` — the
+   * Netlify feed, the own feed (which lived inside `OwnAnalyticsTab`), the
+   * annotation markers and the saved-views list. They were four separate
+   * invocations of `admin-analytics` on every mount; behind M4's snapshots
+   * each one is a blob read or two, which made the ~300 ms per-invocation
+   * platform floor, charged four times, the largest thing left on the page.
+   * `?resource=boot` answers all four in one, degrading each part
+   * independently on the server so a dead saved-views list still cannot cost
+   * a viewer their KPIs.
+   *
+   * THE KEY IS THE RANGE, NOT THE WINDOW. The three keys this replaces were
+   * `analytics:netlify:${windowKey}` and friends, and `windowKey` is
+   * `${window.from}:${window.to}` with `to = Date.now()` to the millisecond —
+   * so every mount minted a key nothing had ever written, and this page's
+   * whole cache stack (browser and server alike) has never hit for a preset
+   * range. `analyticsBootKey` carries what the viewer actually chose, so a
+   * return visit inside `CACHED_RESOURCE_MAX_AGE_MS` paints synchronously.
+   *
+   * Both feeds are fetched whichever tab is showing, which is what the page
+   * already did: the own tab's capture-rate stat (D9) needs Netlify's
+   * pageviews. What changes is that parking on the Netlify tab no longer
+   * costs a tracking-sink call — behind the snapshot it costs a blob read.
    */
-  const netlifyResource = useCachedResource<AnalyticsOverview>(
-    `analytics:netlify:${windowKey ?? 'invalid'}`,
-    () => fetchAnalyticsOverview(getToken, { range: rangeKey, custom: rangeKey === 'custom' ? custom : undefined }),
+  const bootOptions = useMemo(
+    () => ({ range: rangeKey, custom: rangeKey === 'custom' ? custom : undefined, filters }),
+    [rangeKey, custom, filters]
+  );
+  const bootResource = useCachedResource<AnalyticsBoot>(
+    analyticsBootKey(bootOptions),
+    (signal) => fetchAnalyticsBoot(getToken, bootOptions, signal),
     undefined,
     { enabled: hydrated && windowResult.ok }
   );
-  const netlifyOverview = netlifyResource.value ?? null;
-  const netlifyLoading = netlifyResource.loading;
-  const netlifyError = netlifyResource.value ? null : (netlifyResource.error ?? null);
+  const boot = bootResource.value;
+
+  const netlifyOverview = bootNetlify(boot);
+  const netlifyLoading = bootResource.loading;
+  const netlifyError = netlifyOverview ? null : (bootPartError(boot?.netlify) ?? bootResource.error ?? null);
+
+  const ownOverview = bootOwn(boot);
+  const ownLoading = bootResource.loading;
+  const ownError = ownOverview ? null : (bootPartError(boot?.own) ?? bootResource.error ?? null);
 
   /**
    * R11.3 — the merged release/publish/note marker list every chart draws
-   * ticks from, site-wide (not per tracking-source) — read once per window
-   * and shared by both tabs rather than duplicated per feed.
+   * ticks from, site-wide and shared by both tabs.
    *
-   * T5.2: this is the slowest call on the page, and it has never gated
-   * anything — a chart simply draws without ticks until it answers, and an
-   * outright failure degrades to no ticks rather than a toast (a decorative
-   * chart annotation is not worth an error). Making it a cached resource
-   * keeps that exactly, and adds the one thing it was missing: a window this
-   * page has already drawn gets its ticks back immediately instead of
-   * re-earning them on every visit.
+   * It has never gated anything: a chart draws without ticks until it
+   * answers, and a failure degrades to no ticks rather than a toast. Riding
+   * boot keeps that exactly — a degraded `markers` part is an empty list.
    */
-  const markersResource = useCachedResource<AnnotationMarker[]>(
-    `analytics:markers:${windowKey ?? 'invalid'}`,
-    () =>
-      fetchAnnotationMarkersRequest(getToken, {
-        from: new Date(windowResult.ok ? windowResult.window.from : 0).toISOString(),
-        to: new Date(windowResult.ok ? windowResult.window.to : 0).toISOString(),
-      }),
-    undefined,
-    { enabled: hydrated && windowResult.ok }
-  );
   const markers = useMemo(
-    () => [...(markersResource.value ?? []), ...(addedNote.key === windowKey ? addedNote.markers : [])],
-    [markersResource.value, addedNote, windowKey]
+    () => [...bootMarkers(boot), ...(addedNote.key === windowKey ? addedNote.markers : [])],
+    [boot, addedNote, windowKey]
   );
+
+  // R11.1 — the saved-views list arrives with boot. Local edits (`setViews`
+  // after a save or a delete) still win until the next boot read, which
+  // re-reads the server list that already contains them.
+  const bootViewsList = boot && !isBootPartError(boot.views) ? boot.views : undefined;
+  useEffect(() => {
+    if (bootViewsList) setViews(bootViewsList);
+  }, [bootViewsList]);
 
   const handleDayClick = (isoDate: string) => setNoteDialogDate(isoDate.slice(0, 10));
 
@@ -1709,10 +1714,11 @@ function AnalyticsBody({ identity }: { identity: SiteIdentity }) {
       label: 'Own tracker',
       content: (
         <OwnAnalyticsTab
-          rangeKey={rangeKey}
-          custom={rangeKey === 'custom' ? custom : undefined}
+          overview={ownOverview}
+          loading={!hydrated || ownLoading}
+          error={ownError}
+          refreshing={bootResource.refreshing}
           windowResult={windowResult}
-          windowKey={windowKey}
           filters={filters}
           compare={compare}
           pagesSort={pagesSort}

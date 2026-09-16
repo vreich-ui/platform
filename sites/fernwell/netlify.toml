@@ -179,6 +179,24 @@
 [functions."release-snapshot-refresh"]
   schedule = "*/2 * * * *"
 
+# M3.4: the CMS-Agent health probe, on a clock instead of on a page load. It
+# used to run live on admin-governance's `get` verb — 2768 ms of a 3.9 s
+# /admin/visual-identity load — behind a per-instance memo that a cold
+# container starts empty. This stores the last result in
+# snapshots/governance.json; a page reads the blob and never probes. Minute
+# offset 4 keeps it clear of the two `*/5` passes and of minute 23.
+[functions."governance-probe-refresh"]
+  schedule = "4-59/5 * * * *"
+
+# M4: the hourly warm for snapshots/analytics/<source>/<range>.json. The page
+# serves those blobs and refreshes them in the background, but a frozen
+# function container never finishes a promise it did not await — so this is the
+# guarantee, and the background refresh is only an optimisation. Without this
+# block the tenant's analytics blobs only ever move when somebody opens the
+# page and waits for the eleven-call Netlify Analytics fan-out.
+[functions."analytics-snapshot-warm"]
+  schedule = "47 * * * *"
+
 [[redirects]]
   from = "/pdf/*"
   to = "/.netlify/functions/get-public-pdf?blobKey=pdf/:splat"

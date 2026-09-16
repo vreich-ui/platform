@@ -214,7 +214,16 @@ export type MembershipPolicyOverride = z.infer<typeof membershipPolicyOverrideSc
 /** Minimal blob-store surface the membership helpers need (injectable for tests). */
 export interface MembershipStore {
   get(key: string): Promise<string | null>;
-  setJSON(key: string, value: unknown): Promise<void | { modified: boolean; etag?: string }>;
+  /** M3.2 — optional: the only source of a CAS token (`snapshots/guarded-doc.ts`). */
+  getWithMetadata?(
+    key: string,
+    options?: { type?: 'text' }
+  ): Promise<{ data: unknown; etag?: string } | null | undefined>;
+  setJSON(
+    key: string,
+    value: unknown,
+    options?: { onlyIfNew?: true; onlyIfMatch?: string }
+  ): Promise<void | { modified: boolean; etag?: string }>;
   /**
    * MUST be consumed through `collectBlobListItems` — with `paginate: true`
    * the real Netlify Blobs client returns a plain `AsyncIterable` of pages

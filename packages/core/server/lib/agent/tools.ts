@@ -30,7 +30,7 @@ import { z } from 'zod';
 import type { Role } from '../roles.js';
 import { projectActivityForChat } from '../requests/activity-for-chat.js';
 import { fetchPublicationOutputs } from '../requests/publication-outputs.js';
-import { nodeLabel } from '../../../lib/admin/request-logic.js';
+import { nodeLabel } from '../../../lib/admin/request-node-labels.js';
 import { buildLostReleaseResult } from '../../../lib/release/release-async.js';
 import { objectTypeSchema, type ObjectType } from '../../../schema/object-record-v1.js';
 import type { RequestKind } from '../requests/store.js';

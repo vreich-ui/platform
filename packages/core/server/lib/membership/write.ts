@@ -26,6 +26,7 @@ import {
 } from './store.js';
 import { getSiteIdentity } from '../../../lib/site-identity.js';
 import { collectBlobListItems } from '../blob-list.js';
+import { armMembersSnapshot, commitMembersSnapshot } from './snapshot-store.js';
 
 export const putPerson = async (store: MembershipStore, person: Person): Promise<Person> => {
   const validated = personSchema.parse({ ...person, email: normalizeEmail(person.email) });
@@ -43,11 +44,20 @@ export const putMembership = async (store: MembershipStore, membership: Membersh
   return validated;
 };
 
-/** Person + membership + indexes in one call (the lazy migration lands here too). */
+/**
+ * Person + membership + indexes in one call (the lazy migration lands here
+ * too), and — since M3.2 — the amendment of `snapshots/members.json`. The alarm
+ * is armed BEFORE the records are written and disarmed by the commit after, so
+ * a crash between leaves a sticky flag rather than a list quietly short a row.
+ * Neither call can fail this write.
+ */
 export const saveMember = async (store: MembershipStore, member: { person: Person; membership: Membership }) => {
+  const lease = await armMembersSnapshot(store, Date.now());
   const person = await putPerson(store, member.person);
   const membership = await putMembership(store, { ...member.membership, person_id: person.person_id });
-  return { person, membership, legacy: false as const };
+  const saved = { person, membership, legacy: false as const };
+  await commitMembersSnapshot(store, lease, { upserts: [saved], nowMs: Date.now() });
+  return saved;
 };
 
 /** Append one event to the audit stream (`audit/<yyyy-mm>/<ulid>.json`). Never throws the caller's write away. */
@@ -199,7 +209,15 @@ export const stampOnboarding = async (
     await saveMember(store, { person, membership: member.membership });
     return person;
   }
-  return putPerson(store, person);
+  // The PERSON-only branch — the third and last place a member row changes, so
+  // it carries the same arm and commit. The membership half is the read above.
+  const lease = await armMembersSnapshot(store, Date.now());
+  const saved = await putPerson(store, person);
+  await commitMembersSnapshot(store, lease, {
+    upserts: [{ person: saved, membership: member.membership, legacy: false }],
+    nowMs: Date.now(),
+  });
+  return saved;
 };
 
 /**

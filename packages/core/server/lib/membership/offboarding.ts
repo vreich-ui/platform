@@ -39,7 +39,7 @@ import { isObjectLockActive } from '../object-lock.js';
 import { collectBlobListItems, type BlobListItem, type BlobListResponse } from '../blob-list.js';
 import { objectRecordKey, objectStatusIndexPrefix } from '../object-store-keys.js';
 import { putObjectRecord, type ObjectRecordWriteStore } from '../objects/record-writer.js';
-import { subjectIndexEntrySchema, subjectIndexPrefix, type OAuthBlobStore } from '../oauth-store.js';
+import { subjectIndexEntrySchema, subjectIndexPrefix, type OAuthBlobStore } from '../oauth-subject-index.js';
 import { getMembershipByEmail, listMembers, type Member } from './read.js';
 import { listInvitations, type FetchLike, type GoTrueIdentity } from './invitations.js';
 import {
@@ -54,6 +54,7 @@ import {
   type Person,
 } from './store.js';
 import { appendAudit, getPolicy, listAuditForEmail, saveMember, putMembership } from './write.js';
+import { armMembersSnapshot, commitMembersSnapshot } from './snapshot-store.js';
 
 // ── OAuth grants ────────────────────────────────────────────────────────────
 
@@ -359,6 +360,9 @@ export const scrubPerson = async (
   }
 ): Promise<void> => {
   const { person, membership } = input;
+  // M3.2 — the one path that REMOVES a row from `snapshots/members.json`,
+  // armed before the first record write exactly as `saveMember` arms.
+  const lease = await armMembersSnapshot(store, Date.now());
   // indexes first, so a concurrent read cannot resolve the e-mail to a scrubbed record
   if (typeof store.delete === 'function') {
     await store.delete(KEYS.byEmail(person.email)).catch(() => undefined);
@@ -382,6 +386,9 @@ export const scrubPerson = async (
     audit: [...membership.audit, { at: input.at, actor_email: 'system', action: 'purge' }],
     updated_at: input.at,
   });
+  // The person record is a tombstone now, so `listMembers` drops this member
+  // (`getPerson` cannot parse it). The list must drop it too.
+  await commitMembersSnapshot(store, lease, { removals: [person.person_id], nowMs: Date.now() });
 };
 
 /** Sweep: every `removed` membership past `purge_after` is scrubbed. Idempotent. Returns the person ids purged. */

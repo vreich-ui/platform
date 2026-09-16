@@ -1367,6 +1367,18 @@ cadence rather than a slower one: `*/2` is only wanted while a deploy is in flig
 `RELEASE_SNAPSHOT_MAX_AGE_MS` (10 minutes) already means a `*/5` schedule would not trip the
 read-path rebuild. Do not reach for the rebuild bound instead — a read-path repair on
 `admin-release-state` is the 14 s compute this wave exists to remove.
+**Update (wave 2, M3.4 + M4, 2026-09-16):** two more schedules landed, and both state their
+arithmetic in their own function headers as this entry asked. `governance-probe-refresh`
+(`4-59/5 * * * *`) is 288 passes per tenant per day = **1,728 fleet invocations**, each one CMS-Agent
+probe (capped at 3 s), one blob read and one blob write — so also 1,728 CMS-Agent probes a day that
+used to be charged to whoever opened an admin page on a cold instance.
+`analytics-snapshot-warm` (`47 * * * *`) is 24 passes per tenant per day = **144 fleet invocations**,
+each 11 Netlify Analytics calls plus one tracking-sink call at the steady-state default, 33 + 3 at
+the ceiling where a tenant keeps all three ranges warm. Wave-2 total added: **1,872 scheduled
+invocations a day**, taking the wave's fleet total to 6,192. The scaling caveat above applies
+unchanged — twenty tenants makes the three schedules 20,640 a day with no code change — and the
+same lever is available for the probe: `CMS_AGENT_PROBE_MAX_AGE_MS` (15 minutes) means a
+ten-minute cadence would not change what any page renders, only how fresh a verdict is.
 
 ### 73. The object-status pills now render release state of unbounded age, unlabelled
 
@@ -1397,6 +1409,90 @@ the pre-M2.2 freshness guarantee at the cost of one extra call per outage window
 writes the rebuilt snapshot back, so it self-heals rather than repeating). The first is more
 honest; the second is smaller. Either wants the wave's own author, not a reviewer, because it
 reverses part of a decision that file argues for at length.
+
+### 74. A snapshot rebuild overtaken by a completed write publishes stale rows that read as trusted
+
+**Category:** ambiguous-canonical-source · **Severity:** low · **Sources:** perf/admin-read-model wave-2 integration 2026-09-16
+**Evidence:** every guarded snapshot in this wave repairs the same way: read the document, find it
+untrusted (absent, corrupt, or `armed`), sweep the records, then write what the sweep found
+UNCONDITIONALLY — `snapshots/guarded-doc.ts:writeRebuiltDoc`, and `objects/index-doc.ts:persistIndex`
+before it. The unconditional write is deliberate and mostly right: a document re-derived whole
+cannot lose what it re-derived, and an amendment racing it loses its compare-and-swap, re-arms, and
+costs one more rebuild. The interleaving it does not cover is the reverse order. Rebuild R reads an
+armed document and starts its sweep; a concurrent repair clears the flag; writer W then arms,
+writes its record and commits correctly; R finally writes, at `max(seq)+1`, the rows it swept before
+W existed. The result is complete-looking, unarmed, newer by `seq`, and short one record.
+**Applies to:** `objects/index.json` (since M0), `snapshots/chats.json`, `snapshots/members.json`
+and — since wave-2 integration — `snapshots/visual-identity.json`. It does NOT apply to
+`snapshots/governance.json` or `snapshots/analytics/**`, which are re-derivations with no amendment
+path at all. M3.3 shipped the one design that avoided it, by carrying the alarm in a SECOND blob
+(`snapshots/visual-identity.version`) whose seq could disagree with the snapshot's; integration
+dropped that blob to converge on one mechanism and one page-path blob read, which is the trade
+this entry records.
+**Impact:** narrow — it needs a rebuild slow enough to span another actor's whole arm-and-commit,
+which needs a repair to have cleared the flag underneath it first — and self-healing on the next
+write of any record the snapshot projects, because that write arms the document again. Nothing
+observed. But while it lasts the reader cannot tell: a stale row has no age affordance, and this is
+the one failure in the wave that a `trusted` snapshot can hide.
+**Direction:** close it in `guarded-doc.ts` for all four at once, not per snapshot. `writeRebuiltDoc`
+already re-reads the document for a monotonic `seq`; give it the etag the rebuild observed BEFORE it
+swept and make the write a compare-and-swap on that etag when the document was PRESENT (create when
+it was not). A rebuild that lost the race then writes nothing and leaves the next read to repair,
+which is the same cost the losing amendment already pays. It needs the etag plumbed through three
+call sites (`agent/chat-store.ts`, `membership/read.ts`,
+`visual-identity/snapshot-store.ts`) and the equivalent in `objects/index-store.ts`, which is why
+it is an entry here rather than a line in the integration.
+
+### 75. The analytics warm is a scheduled function with no clock guard, against a 30 s wall that logs nothing
+
+**Category:** ambiguous-canonical-source · **Severity:** low · **Sources:** perf/admin-read-model wave-2 adversarial review 2026-09-16
+**Evidence:** `functions/analytics-snapshot-warm.ts` is the GUARANTEE behind
+`snapshots/analytics/**` — its own header says so, because the read path's background refresh is
+un-awaited and this runtime freezes a container the moment a response is written. It is a SCHEDULED
+function, and a scheduled function is killed at 30 s with no log line of any kind: no JSON from the
+function, no `Duration:` line, no timeout line. This fleet has already paid for exactly that once —
+`media-compaction-sweep` spent three days being killed mid-run while its log was indistinguishable
+from "the schedule never fired" (`media-compaction-run.ts:SWEEP_BUDGET_MS`, and the *Confirming a
+scheduled function actually RAN* note in `docs/DEPLOYMENT.md`). A warm pass is up to six serial
+upstream fan-outs; `netlify-analytics.ts` bounds each call at 6 s in two dependent layers, so the
+worst case for one `netlify` pair alone is ~24 s.
+**Mitigated, not closed (REVIEW2):** the pass now watches its own clock
+(`ANALYTICS_WARM_BUDGET_MS`, 20 s, the number `media-compaction-run.ts` picked against the same
+wall), stops STARTING pairs past it and reports them as `deferred`; and `analyticsWarmTargets`
+orders the pass so the default range's two feeds — the pair a bare visit to `/admin/analytics`
+opens — are always the two that complete. The function therefore RETURNS and says what it did not
+get to, instead of dying silently. What is not fixed is the ceiling: a tenant that keeps all three
+ranges warm can have its two non-default ranges deferred every pass and never refreshed by the
+schedule at all, which leaves them to the un-awaited background refresh that may never run.
+**Direction:** the dispatcher/background split `media-compaction-sweep` took, and for the same
+reason — a background function gets 15 minutes and a function cannot be both scheduled and
+background. That is one new core function, six per-tenant shims, the `create-site.mjs` scaffold and
+the dry-run fixture (P1), plus a one-shot trigger token, because a background function is a public
+endpoint. Worth doing the first time `deferred` is non-empty in a production log; not worth
+inventing a token store for a schedule that has never been measured missing its budget.
+
+### 76. The visual-identity snapshot and its client-side fallback hand a caller two different record shapes
+
+**Category:** ambiguous-canonical-source · **Severity:** low · **Sources:** perf/admin-read-model wave-2 adversarial review 2026-09-16
+**Evidence:** `projectVisualIdentityEntry` (`visual-identity/snapshot-doc.ts`) stores each record
+with `history: []` and an added `history_length`, and the rebuild uses the same projection, so the
+two SERVER paths agree — that much was checked and is sound. The CLIENT fallback does not:
+`studio-client.ts:loadType` is reached whenever `admin-object{action:'visual_identity_snapshot'}`
+does not answer 200 (a deployment older than the action, a shape that fails the guard), and it
+returns the records straight off `object_get` — real `history`, no `history_length`. So the same
+`StudioData.templates[0]` has a populated ledger and no length on the repair path and an empty
+ledger and a length on the fast one.
+**Impact:** none today, verified with `rg` over every consumer of `fetchStudioData` /
+`StudioRecord`: nothing on `/admin/settings/visual-identity`, `Studio.tsx`, `TemplatesWorkspace` or
+`KitGallery` reads `history` off one of the four types. The one `history` read on that surface is
+`visual-identity-imagery.ts:readAppliedImagerySource`, and it reads the `site` record, which is not
+one of the four and still arrives whole from `object_get`. The trap is the next consumer: a feature
+that reads `history_length` works on every warm tenant and reads `undefined` the first time the
+snapshot is cold, which is the failure that only appears in production and only rarely.
+**Direction:** pick one shape and make both paths produce it. Cheapest is for `loadType` to apply
+the same projection on the fallback path, which costs a client-side `map` and makes the divergence
+impossible; the alternative — dropping `history_length` — loses the one affordance that says the
+ledger was subtracted rather than empty.
 
 ## Summary table
 
@@ -1468,5 +1564,8 @@ Sorted by severity, then by id.
 | 68 | low | dead-code | `site.chrome.announcement` is validated but never rendered | W0 T0.1 |
 | 69 | low | ambiguous-canonical-source | Committed exports and store records drift apart in both directions, undetected | B1 follow-up |
 | 70 | low | ambiguous-canonical-source | An unreachable object store and an empty library are the same inventory answer | M2.1 |
-| 72 | low | ambiguous-canonical-source | `release-snapshot-refresh` is 4,320 fleet invocations a day, uncosted | perf review |
+| 72 | low | ambiguous-canonical-source | scheduled-function fleet cost: 6,192 invocations a day across three schedules, now costed in each header | perf review |
 | 73 | low | ambiguous-canonical-source | Object-status pills render release state of unbounded age, unlabelled | perf review |
+| 74 | low | ambiguous-canonical-source | A snapshot rebuild overtaken by a completed write publishes stale rows that read as trusted | wave-2 integration |
+| 75 | low | ambiguous-canonical-source | The analytics warm is a scheduled function with no clock guard, against a 30 s wall that logs nothing | wave-2 review |
+| 76 | low | ambiguous-canonical-source | The visual-identity snapshot and its client fallback hand a caller two different record shapes | wave-2 review |

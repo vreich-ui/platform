@@ -43,15 +43,36 @@
  * focus) never re-hits Netlify's undocumented, presumably rate-limited
  * Analytics API more than once per TTL.
  *
+ * ## M4 (2026-09-16) — what this function stopped doing
+ *
+ * Two things, and they are the milestone:
+ *
+ *  1. IT NO LONGER CALLS NETLIFY ANALYTICS OR THE TRACKING SINK ON A PAGE
+ *     PATH. The eleven-call fan-out and the sink call moved to
+ *     `lib/analytics/snapshot-store.ts`; the feed branches read one blob per
+ *     `(source, range)`, serve it whatever its age, and kick a background
+ *     refresh past `ANALYTICS_SNAPSHOT_MAX_AGE_MS`. Only a COLD read — no blob
+ *     at all — still builds inline, which is a spinner that resolves rather
+ *     than a dashboard of zeros.
+ *
+ *     Why the memo that was already here never helped: its key carried
+ *     `${window.from}:${window.to}`, and `resolveDateWindow('30d', new Date())`
+ *     returns `to = Date.now()` to the millisecond. Every page load minted a
+ *     key nothing had ever written. The same defect sat in the browser cache
+ *     above it. A blob keyed by the RANGE is the fix.
+ *
+ *  2. `?resource=boot` answers the whole mount in ONE invocation. The memo
+ *     that remains is for a FILTERED own read, which deliberately bypasses the
+ *     snapshot (filters are an unbounded key space — see `refreshAnalyticsSnapshot`).
+ *
  * ## Server-Timing sections (T-analytics) — reading one `/admin/analytics` load
  *
- * `/admin/analytics` fires FOUR separate invocations of this function at
- * mount (`?resource=views`, `?source=netlify`, `?source=own`,
- * `?resource=annotations`), plus `?source=insights` on tab open. They are
- * separate requests, so devtools shows four `Server-Timing` rows side by side
- * and — until these sections existed — the four looked identical from the
- * outside, which is how three consecutive waves ended up guessing which row
- * carried the page's `work`.
+ * A mount is now ONE row (`sec.boot`), not four. The per-resource endpoints
+ * below it are unchanged and still answer a range change, a filter change and
+ * a saved-view apply; `?source=insights` still opens with its tab. Until these
+ * sections existed the four mount rows looked identical from the outside,
+ * which is how three consecutive waves ended up guessing which carried the
+ * page's `work`.
  *
  * Exactly ONE branch section is emitted per invocation, and it is the branch
  * name: `sec.views` · `sec.netlify` · `sec.own` · `sec.annotations` ·
@@ -65,9 +86,21 @@
  * further — an external HTTP call, local store work and local CPU are three
  * different findings and must not share one number:
  *
+ *   `boot`                       — the whole mount: both feeds, the saved-views
+ *       list and the annotation markers, each degrading independently.
+ *   `snapshot_netlify` / `snapshot_own` — ONE blob read each. Named per feed
+ *       because boot runs them concurrently and `timeSection` sums same-named
+ *       sections.
+ *   `snapshot_build_netlify` / `snapshot_build_own` — present ONLY on a cold
+ *       read, and the `netlify_upstream_*` sections below sit inside it. A row
+ *       carrying one of these on a warm tenant means the blob went missing.
+ *
  *   `netlify_upstream_pageviews` — the CURRENT window: `/pageviews`, then
  *       `/visitors` + `/ranking/pages` + `/ranking/sources` fanned out. Four
- *       Netlify Analytics calls in two dependent layers.
+ *       Netlify Analytics calls in two dependent layers. Emitted by the
+ *       BUILDER (`lib/analytics/snapshot-store.ts`), so it appears on a
+ *       scheduled warm, a background refresh, or a cold build — never on a
+ *       warm page read.
  *   `netlify_upstream_previous`  — those same four again for the preceding
  *       window (D3's KPI deltas). Best-effort.
  *   `netlify_upstream_rankings`  — `/ranking/not_found` + `/ranking/countries`.
@@ -109,29 +142,26 @@ import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { timeAuth, timeSection, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import {
-  fetchTrafficAnalytics,
-  fetchNotFoundAndCountries,
-  fetchPreviousTrafficAnalytics,
-  fetchBandwidth,
-  isNetlifyAnalyticsLookupConfigured,
-  NetlifyAnalyticsNotEnabledError,
-} from '../lib/netlify-analytics.js';
+  analyticsBodyEtag,
+  analyticsSnapshotCoversWindow,
+  buildOwnAnalyticsBody,
+  isAnalyticsSnapshotFresh,
+  readAnalyticsSnapshot,
+  refreshAnalyticsSnapshot,
+  refreshAnalyticsSnapshotInBackground,
+  type AnalyticsSnapshotSource,
+  type AnalyticsSnapshotStore,
+} from '../lib/analytics/snapshot-store.js';
 import {
   resolveDateWindow,
-  mapAnalyticsToChartSeries,
   DEFAULT_ANALYTICS_RANGE,
   isAnalyticsRangeKey,
   isAnalyticsSource,
+  type AnalyticsDateWindow,
   type AnalyticsRangeKey,
   type AnalyticsFilters,
 } from '../../lib/admin/analytics-logic.js';
-import { surfaceSplit } from '../../lib/admin/own-analytics-logic.js';
-import {
-  fetchOwnTrackerRawExport,
-  fetchOwnTrackerStats,
-  ownTrackerMissingEnvVars,
-  type OwnTrackerExportKind,
-} from '../lib/own-tracker-stats.js';
+import { fetchOwnTrackerRawExport, type OwnTrackerExportKind } from '../lib/own-tracker-stats.js';
 import {
   armMetricsMissingEnvVars,
   fetchOwnTrackerRollups,
@@ -220,14 +250,12 @@ const cachedResponse = (entry: MemoEntry, ifNoneMatch: string | undefined) => {
 };
 
 /**
- * R6.2/D2 — "probe `/bandwidth` once [per deploy]": a tenant whose Netlify
- * plan doesn't carry this endpoint should not have every dashboard load
- * retry it. Sticks to `false` (never try again this instance) the first time
- * the probe comes back `null`; a tenant that DOES have it keeps getting a
- * live number every call, keyed by nothing here — `fetchBandwidth` itself is
- * still per-window.
+ * R6.2/D2's `/bandwidth` probe latch moved to `lib/analytics/snapshot-store.ts`
+ * with the builder it guards (M4). It was a per-INSTANCE latch on a page
+ * function, which is to say a latch that reset on every cold container; on the
+ * builder it is per pass, which is the right granularity for "this tenant's
+ * plan does not carry the endpoint".
  */
-let bandwidthKnownUnavailable = false;
 
 /**
  * D7 — the three sink filter params, read off the wire names
@@ -256,58 +284,107 @@ const filterCacheKey = (filters: AnalyticsFilters): string =>
  * honest not-configured state.
  */
 /**
- * W7.4 — the publishing surface for each object in the top-N window.
+ * M4 — the snapshot layer both feed branches share.
  *
- * Read from the PUBLISH RECEIPT on each record: that receipt is stamped at
- * publish from the auth-derived actor, so it says which chat app (or the
- * autonomous workflow) produced the revision that is live. `null` means the
- * record exists and carries no surface — the workflow path, or a revision
- * published before W7.4 stamped one; an id absent from the map entirely means
- * the record could not be read, which the split reports as `unknown` rather
- * than folding into either.
+ * `serveAnalyticsFeed` is the whole stale-while-revalidate rule in one place,
+ * so `?source=netlify`, `?source=own` and `?resource=boot` cannot drift from
+ * each other:
  *
- * Bounded by construction: `top_objects` is a top-N list (tens, not thousands),
- * so this is a handful of point reads on an admin dashboard load, not a scan.
- * Individual read failures are skipped rather than failing the page — an analytics
- * dashboard that 500s because one object is unreadable is worse than one that
- * says "unknown" for that row.
+ *   1. Read the blob for this `(source, range)`. ONE blob read.
+ *   2. Got one -> serve it, whatever its age, and if it is past
+ *      `ANALYTICS_SNAPSHOT_MAX_AGE_MS` start a refresh WITHOUT awaiting it.
+ *      Nobody waits for eleven Netlify Analytics calls ever again.
+ *   3. Nothing there -> build it now, store it, serve it. That is the cold
+ *      case, and it is the one place a page still pays upstream: a spinner
+ *      that resolves, which is the right answer. Serving zeros from an empty
+ *      cache would be a wrong number, and a wrong number on a dashboard is
+ *      worse than a wait.
+ *
+ * `publishingSurfaces` and the eleven-call Netlify fan-out that used to live
+ * in this file moved to `lib/analytics/snapshot-store.ts` with the rest of the
+ * builder. A page function that cannot build a feed inline is a page function
+ * that cannot accidentally build one inline.
  */
-const publishingSurfaces = async (
-  binding: SiteBinding,
-  topObjects: ReadonlyArray<{ object_id?: unknown }>
-): Promise<Record<string, string | null>> => {
-  const ids = [...new Set(topObjects.map((row) => (typeof row?.object_id === 'string' ? row.object_id : '')))].filter(
-    Boolean
-  );
-  if (ids.length === 0) return {};
+type FeedRead = { body: Record<string, unknown>; asOf: string; stale: boolean; built: boolean };
 
-  let store: Awaited<ReturnType<typeof getSiteObjectsBlobStore>>;
-  try {
-    store = await getSiteObjectsBlobStore({}, binding);
-  } catch {
-    return {};
+const serveAnalyticsFeed = async (
+  store: AnalyticsSnapshotStore,
+  options: {
+    source: AnalyticsSnapshotSource;
+    range: AnalyticsRangeKey;
+    window: AnalyticsDateWindow;
+    binding: SiteBinding;
+    siteHost?: string | undefined;
+  }
+): Promise<FeedRead> => {
+  const nowMs = Date.now();
+  // Named per FEED, not per call: `?resource=boot` runs both of these
+  // concurrently, and `timeSection` sums same-named sections — one `sec.snapshot`
+  // carrying two overlapping reads would say nothing about which feed was cold.
+  const stored = await timeSection(`snapshot_${options.source}`, () =>
+    readAnalyticsSnapshot(store, options.source, options.range)
+  );
+  /**
+   * REVIEW2 — a blob that answers a DIFFERENT window is not stale, it is about
+   * something else, and serving it is serving a wrong number. Only `custom` can
+   * be in that state (one key, every span anybody has ever picked); a preset
+   * range can never be, which is why this costs nothing on the path that
+   * matters. See `analyticsSnapshotCoversWindow`.
+   */
+  const existing = stored && analyticsSnapshotCoversWindow(stored, options.range, options.window) ? stored : undefined;
+  if (existing) {
+    const fresh = isAnalyticsSnapshotFresh(existing, nowMs);
+    if (!fresh) {
+      refreshAnalyticsSnapshotInBackground(store, {
+        source: options.source,
+        range: options.range,
+        window: options.window,
+        nowMs,
+        binding: options.binding,
+        ...(options.siteHost !== undefined ? { siteHost: options.siteHost } : {}),
+      });
+    }
+    return { body: existing.body, asOf: existing.as_of, stale: !fresh, built: false };
   }
 
-  const entries = await Promise.all(
-    ids.map(async (objectId) => {
-      for (const objectType of ['content_item', 'page'] as const) {
-        try {
-          const raw = await store.get(objectRecordKey(objectType, objectId));
-          if (!raw) continue;
-          const record = JSON.parse(raw as string) as ObjectRecord;
-          return [objectId, record.publication?.publish_receipt?.surface ?? null] as const;
-        } catch {
-          // Unreadable or not this type — try the next, then give up quietly.
-        }
-      }
-      return null;
+  const { snapshot } = await timeSection(`snapshot_build_${options.source}`, () =>
+    refreshAnalyticsSnapshot(store, {
+      source: options.source,
+      range: options.range,
+      window: options.window,
+      nowMs,
+      binding: options.binding,
+      ...(options.siteHost !== undefined ? { siteHost: options.siteHost } : {}),
     })
   );
-  return Object.fromEntries(entries.filter((entry): entry is readonly [string, string | null] => entry !== null));
+  return { body: snapshot.body, asOf: snapshot.as_of, stale: false, built: true };
 };
+
+/** The wire shape both feed branches answer with: the stored body plus the staleness it was served at. */
+const feedBody = (read: FeedRead): Record<string, unknown> => ({
+  ...read.body,
+  /** Stated, never guessed. A lagging feed is visible in the response and in the UI, exactly as `snapshots/release.json` made it. */
+  as_of: read.asOf,
+  stale: read.stale,
+});
+
+/**
+ * `?source=own` — the T21.2b own-tracker feed.
+ *
+ * UNFILTERED reads go through the snapshot. A FILTERED read does not, and that
+ * is deliberate: filters are an unbounded key space (`country` x `source` x
+ * `object_id`), a blob per combination would be written by whoever clicked a
+ * chip, and nothing would ever warm them. A filtered read keeps the
+ * per-instance memo this file has always had, which is what that case was
+ * always worth — and it is one sink call, not the eleven-call fan-out this
+ * milestone exists to remove.
+ */
+const hasFilters = (filters: AnalyticsFilters): boolean =>
+  Boolean(filters.country || filters.source || filters.object_id);
 
 const ownAnalyticsResponse = async (
   binding: SiteBinding,
+  event: LambdaEvent,
   range: AnalyticsRangeKey,
   custom: { from: string; to: string } | undefined,
   filters: AnalyticsFilters,
@@ -317,65 +394,30 @@ const ownAnalyticsResponse = async (
   if (!windowResult.ok) return jsonResponse(400, { error: windowResult.error });
   const window = windowResult.window;
 
-  const missing = ownTrackerMissingEnvVars();
-  if (missing.length > 0) {
-    return jsonResponse(
-      200,
-      {
-        configured: false,
-        enabled: false,
-        error_code: 'own_tracker_unconfigured',
-        message: 'The own-tracker sink is not configured for this site.',
-        range,
-      },
-      { 'Cache-Control': CACHE_CONTROL }
-    );
+  if (!hasFilters(filters)) {
+    const store = (await getAnalyticsViewsBlobStore(event, binding)) as unknown as AnalyticsSnapshotStore;
+    const body = feedBody(await serveAnalyticsFeed(store, { source: 'own', range, window, binding }));
+    return cachedResponse({ body, etag: analyticsBodyEtag(body), expiresAt: 0 }, ifNoneMatch);
   }
 
-  const cacheKey = `own:${binding.siteId}:${range}:${window.from}:${window.to}:${filterCacheKey(filters)}`;
+  /**
+   * INTEGRATE (wave 2): keyed by the RANGE and the explicit custom bounds, not
+   * by the resolved window. The header states why the old key never hit —
+   * `resolveDateWindow('30d', new Date())` ends the window at `Date.now()` to
+   * the millisecond — and M4 fixed it for the unfiltered branch by moving that
+   * read to a blob keyed by range. This branch deliberately keeps the memo
+   * (filters are an unbounded key space and must not become blobs), so it
+   * needed the same correction: a key nothing can ever mint twice is not a
+   * cache, it is a map that grows. `custom` is the one range whose bounds are
+   * caller-supplied and therefore stable, so it is what identifies that window.
+   */
+  const customKey = range === 'custom' ? `${custom?.from ?? ''}:${custom?.to ?? ''}` : '';
+  const cacheKey = `own:${binding.siteId}:${range}:${customKey}:${filterCacheKey(filters)}`;
   const cached = memo.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
 
   try {
-    // `own_sink_stats` is the ONE external call this branch makes; the two
-    // sections after it are local store work, and they are deliberately
-    // measured apart from it and from each other — "the sink is slow", "the
-    // export directory is cold" and "the per-object surface reads are a
-    // sweep in disguise" are three different findings with three different
-    // fixes, and a single number for the branch cannot tell them apart.
-    const stats = await timeSection('own_sink_stats', () =>
-      fetchOwnTrackerStats(
-        { from: new Date(window.from).toISOString(), to: new Date(window.to).toISOString() },
-        { filters: { country: filters.country, source: filters.source, object_id: filters.object_id } }
-      )
-    );
-
-    // D6 — resolve every object id this response references (top objects +
-    // the engagement funnel) to title/route/admin-link, server-side.
-    const objectIds = [
-      ...(stats.top_objects ?? []).map((row) => row?.object_id),
-      ...(stats.engagement_funnel ?? []).map((row) => row?.object_id),
-    ].filter((id): id is string => typeof id === 'string' && id.length > 0);
-    const objectDirectory = await timeSection('own_object_directory', () =>
-      resolveAnalyticsObjectDirectory(binding.dataRoot, objectIds)
-    );
-
-    // Measured as its own section rather than folded into the body literal:
-    // this runs strictly AFTER the directory read above (the two are
-    // independent and could be concurrent), so the two durations side by
-    // side are what says whether that sequencing is worth changing.
-    const surfaces = await timeSection('own_surfaces', () => publishingSurfaces(binding, stats.top_objects ?? []));
-
-    const body = {
-      configured: true,
-      enabled: true,
-      range,
-      window,
-      stats,
-      object_directory: objectDirectory,
-      // W7.4: which surface published each of the objects in this window.
-      surfaces: surfaceSplit(stats, surfaces),
-    };
+    const body = await buildOwnAnalyticsBody(binding, range, window, filters);
     const entry: MemoEntry = {
       body,
       etag: await timeSection('own_shape', () => etagFor(body)),
@@ -782,6 +824,108 @@ const armMetricsResponse = async (binding: SiteBinding, ifNoneMatch: string | un
   }
 };
 
+/**
+ * M4 — `GET ?resource=boot`: everything `/admin/analytics` reads on mount, in
+ * ONE invocation.
+ *
+ * The page used to fire four: `?resource=views`, `?source=netlify`,
+ * `?source=own` and `?resource=annotations`. Four invocations is four times
+ * the ~300 ms per-invocation platform floor this wave keeps measuring, on a
+ * page whose data now comes out of blobs — so the floor, not the data, was
+ * about to become the page. This is the same coalescing M2.2 did for the admin
+ * shell.
+ *
+ * The four parts, and what each costs behind the snapshot:
+ *
+ *   - `netlify` / `own` — one blob read each (`serveAnalyticsFeed`), plus a
+ *     background refresh when either is past its bound. Both feeds are fetched
+ *     regardless of which tab is active, which is exactly what the page
+ *     already did: the own tab's capture-rate stat needs Netlify's pageviews.
+ *   - `views` — the saved-views list, one blob read of `views/index.json`.
+ *   - `markers` — W3.3's five warm reads behind this file's own memo. No
+ *     listings, no upstream.
+ *
+ * Every part degrades INDEPENDENTLY: a part that fails comes back as
+ * `{ error }` rather than failing the boot, because a saved-views list that
+ * cannot be read must not cost a viewer their KPIs. That is the posture the
+ * per-resource endpoints already had (the page's own effects each caught), and
+ * coalescing must not quietly convert four independent degradations into one
+ * all-or-nothing call.
+ *
+ * The per-resource endpoints stay, unchanged. They are what a range change, a
+ * filter change and a saved-view apply still use, and they are the fallback if
+ * a client is older than this deploy.
+ */
+const bootResourceResponse = async (
+  binding: SiteBinding,
+  event: LambdaEvent,
+  range: AnalyticsRangeKey,
+  custom: { from: string; to: string } | undefined,
+  filters: AnalyticsFilters
+) => {
+  const windowResult = resolveDateWindow(range, new Date(), custom);
+  if (!windowResult.ok) return jsonResponse(400, { error: windowResult.error });
+  const window = windowResult.window;
+
+  const viewsStore = await timeSection('boot_store', () => getAnalyticsViewsBlobStore(event, binding));
+  const snapshotStore = viewsStore as unknown as AnalyticsSnapshotStore;
+
+  const settle = async <T>(part: string, run: () => Promise<T>): Promise<T | { error: string }> => {
+    try {
+      return await run();
+    } catch (error) {
+      console.error(`admin-analytics boot part failed: ${part}`, error);
+      return { error: `This panel could not be loaded.` };
+    }
+  };
+
+  const [netlify, own, views, markers] = await Promise.all([
+    settle('netlify', async () =>
+      feedBody(
+        await serveAnalyticsFeed(snapshotStore, {
+          source: 'netlify',
+          range,
+          window,
+          binding,
+          siteHost: siteHostFromEnv(),
+        })
+      )
+    ),
+    settle('own', async () =>
+      hasFilters(filters)
+        ? await buildOwnAnalyticsBody(binding, range, window, filters)
+        : feedBody(await serveAnalyticsFeed(snapshotStore, { source: 'own', range, window, binding }))
+    ),
+    settle('views', () => timeSection('boot_views', () => listAnalyticsViews(viewsStore))),
+    settle('markers', async () => {
+      const objectsStore = await getSiteObjectsBlobStore(event, binding);
+      const from = new Date(window.from).toISOString();
+      const to = new Date(window.to).toISOString();
+      return timeSection('boot_markers', () =>
+        fetchAnnotationMarkers({
+          store: objectsStore as unknown as ObjectVerbStore,
+          viewsStore,
+          from,
+          to,
+          shippedCache: shippedMarkerCacheFor(binding, from, to),
+        })
+      );
+    }),
+  ]);
+
+  const body = { range, window, netlify, own, views, markers };
+  const etag = timeSerialize(() => analyticsBodyEtag(body));
+  const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    return { statusCode: 304, headers: { 'Cache-Control': ANNOTATIONS_CACHE_CONTROL, ETag: etag }, body: '' };
+  }
+  // `private, no-cache` (always revalidate), matching `?resource=annotations`
+  // rather than this file's 60 s `CACHE_CONTROL`: boot carries the notes a
+  // viewer may have just added on this same page, and a read after that write
+  // must not be served out of a browser max-age window.
+  return jsonResponse(200, body, { 'Cache-Control': ANNOTATIONS_CACHE_CONTROL, ETag: etag });
+};
+
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   const params = event.queryStringParameters ?? {};
 
@@ -793,6 +937,17 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   // resource/branch below stays GET-only-analytics-JSON, matching the method
   // gate this replaces exactly for every request that doesn't name one of
   // these resources.
+  if (params.resource === 'boot') {
+    if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
+    const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
+    if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
+    if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
+    const bootRange = isRangeKey(params.range) ? params.range : DEFAULT_ANALYTICS_RANGE;
+    const bootCustom =
+      bootRange === 'custom' && params.from && params.to ? { from: params.from, to: params.to } : undefined;
+    return timeSection('boot', () => bootResourceResponse(binding, event, bootRange, bootCustom, readFilters(params)));
+  }
+
   if (params.resource === 'views') {
     const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
@@ -843,7 +998,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.source === 'own') {
     const ifNoneMatchOwn = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
-    return timeSection('own', () => ownAnalyticsResponse(binding, range, custom, filters, ifNoneMatchOwn));
+    return timeSection('own', () => ownAnalyticsResponse(binding, event, range, custom, filters, ifNoneMatchOwn));
   }
 
   if (params.source === 'insights') {
@@ -856,107 +1011,33 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     return timeSection('arm_metrics', () => armMetricsResponse(binding, ifNoneMatchArm));
   }
 
-  // The Netlify branch has no helper of its own (it IS the dispatcher's
-  // tail), so its section wraps the remainder directly rather than a call.
-  // Named `netlify` to sit beside `views`/`own`/`annotations` in a trace of
-  // the four invocations this page fires at mount.
+  // M4 — the Netlify branch is now one blob read behind
+  // `serveAnalyticsFeed`. The eleven-call fan-out it used to run inline lives
+  // in `lib/analytics/snapshot-store.ts` and is reached only by the hourly
+  // warm, by a background refresh, or by the one cold build below it. Named
+  // `netlify` so a trace of this page still reads the way the header says.
   return timeSection('netlify', async () => {
     const windowResult = resolveDateWindow(range, new Date(), custom);
     if (!windowResult.ok) return jsonResponse(400, { error: windowResult.error });
-    const window = windowResult.window;
-
-    // Not configured at all (missing token/site id) — same env vars as
-    // deploy_lookup, so this can only happen if that family is also broken.
-    // Not an error to surface loudly: an honest, catalogued degrade.
-    if (!isNetlifyAnalyticsLookupConfigured()) {
-      return jsonResponse(
-        200,
-        {
-          configured: false,
-          enabled: false,
-          error_code: 'analytics_lookup_unconfigured',
-          message: 'Netlify Analytics credentials are not configured for this site.',
-          range,
-        },
-        { 'Cache-Control': CACHE_CONTROL }
-      );
-    }
 
     const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
-    const cacheKey = `${binding.siteId}:${range}:${window.from}:${window.to}:${window.resolution}`;
-    const cached = memo.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
-
+    const store = (await getAnalyticsViewsBlobStore(event, binding)) as unknown as AnalyticsSnapshotStore;
     try {
-      const siteHost = siteHostFromEnv();
-      // ELEVEN calls to the Netlify Analytics API hang off the next two
-      // statements (4 here, 4 in the previous window, 2 rankings, 1 bandwidth),
-      // in two dependent layers. They are the only thing on this whole page we
-      // do not control, so each group gets its own section: a slow branch has
-      // to say WHICH group, or the fix is a guess again.
-      const raw = await timeSection('netlify_upstream_pageviews', () => fetchTrafficAnalytics(window, siteHost));
-
-      // R6.2 — every one of these is best-effort and independent: none of
-      // them may throw past this point (their own modules already catch), so
-      // a failure on any one never blocks the primary series above.
-      // Concurrent, so the three sections overlap each other.
-      const [previousRaw, notFoundAndCountries, bandwidthBytes] = await Promise.all([
-        timeSection('netlify_upstream_previous', () => fetchPreviousTrafficAnalytics(window, siteHost)),
-        timeSection('netlify_upstream_rankings', () => fetchNotFoundAndCountries(window).catch(() => null)),
-        timeSection('netlify_upstream_bandwidth', () =>
-          bandwidthKnownUnavailable ? Promise.resolve(null) : fetchBandwidth(window)
-        ),
-      ]);
-      if (bandwidthBytes === null) bandwidthKnownUnavailable = true;
-
-      // R6.4/D8 — "excl. admin" combines both path-shaped rankings
-      // (`topPaths` + `topNotFound`) that could carry a `/admin`/`/.netlify`
-      // row; "Internal" is `topSources`' same-host referrers alone. Both are
-      // approximations computed from visible ranking rows only (Netlify's
-      // aggregate totals can't be filtered directly) — labelled as such on
-      // the client, never presented as exact.
-      const excludedAdminVisits =
-        (raw.excludedAdminPathVisits ?? 0) + (notFoundAndCountries?.excludedAdminNotFoundVisits ?? 0);
-      const internalReferrerVisits = raw.internalReferrerVisits ?? 0;
-
-      // Everything from here down is LOCAL CPU — no network. Measured apart
-      // from the upstream sections above so "the API is slow" can never be
-      // confused with "mapping 90 days of buckets is slow".
-      const entry: MemoEntry = await timeSection('netlify_shape', () => {
-        const body = {
-          configured: true,
-          enabled: true,
+      const body = feedBody(
+        await serveAnalyticsFeed(store, {
+          source: 'netlify',
           range,
-          window,
-          series: mapAnalyticsToChartSeries(raw),
-          previousSeries: previousRaw ? mapAnalyticsToChartSeries(previousRaw) : undefined,
-          topNotFound: notFoundAndCountries?.topNotFound,
-          topCountries: notFoundAndCountries?.topCountries,
-          bandwidthBytes,
-          excludedAdminVisits,
-          internalReferrerVisits,
-        };
-        return { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
-      });
-      memo.set(cacheKey, entry);
-      return cachedResponse(entry, ifNoneMatch);
+          window: windowResult.window,
+          binding,
+          siteHost: siteHostFromEnv(),
+        })
+      );
+      return cachedResponse({ body, etag: analyticsBodyEtag(body), expiresAt: 0 }, ifNoneMatch);
     } catch (error) {
-      if (error instanceof NetlifyAnalyticsNotEnabledError) {
-        // A per-tenant plan gap, not a fault — catalogued and cached exactly
-        // like a real result so a tenant without the add-on doesn't hammer the
-        // API every time someone opens the page.
-        const body = {
-          configured: true,
-          enabled: false,
-          error_code: 'analytics_not_enabled',
-          message:
-            'Analytics is not enabled for this site. Turn on the Netlify Analytics add-on for this site in Netlify to see analytics data here.',
-          range,
-        };
-        const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
-        memo.set(cacheKey, entry);
-        return cachedResponse(entry, ifNoneMatch);
-      }
+      // Only a COLD build can reach here (an unconfigured tenant and a tenant
+      // without the add-on both come back as storable bodies, never throws) —
+      // and only for a failure that is neither. Serving a 500 is right: the
+      // alternative, an empty body, is a dashboard of wrong zeros.
       console.error('Failed to load analytics.', error);
       return jsonResponse(500, { error: 'Analytics data could not be loaded.' });
     }

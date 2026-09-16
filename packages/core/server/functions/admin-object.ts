@@ -53,6 +53,12 @@ import {
   type AgentLearningWriteStore,
   type ObjectVerbStore,
 } from '../lib/object-verbs.js';
+import {
+  VISUAL_IDENTITY_OBJECT_TYPES,
+  readVisualIdentitySnapshot,
+  type VisualIdentityObjectType,
+  type VisualIdentitySnapshotStore,
+} from '../lib/visual-identity/snapshot-store.js';
 import type { MarginaliaStore } from '../lib/marginalia-store.js';
 import { buildStoreValidationContext } from '../lib/object-validation-context.js';
 import type { ObjectType } from '../../schema/object-record-v1.js';
@@ -96,6 +102,26 @@ const OBJECT_READ_ACTIONS = new Set(['get', 'list', 'marginalia_list']);
  * admin page load". Making them conditional means first making their bodies
  * a function of their inputs — a wire-contract change, not this one.
  */
+
+/**
+ * M3.3 — the one read that replaces seventeen.
+ *
+ * `/admin/settings/visual-identity` fetched the BODIES of four object types
+ * the only way this surface had: `list` per type, then one `get` per id — four
+ * plus thirteen invocations on drluriescience, each paying the ~250-400 ms
+ * per-invocation platform floor that `functions/admin-shell.ts`' header
+ * measures. The bodies are materialised at write time now
+ * (`objects/record-writer.ts` step 5), and this action serves them: two blob
+ * reads warm, no listing, one invocation.
+ *
+ * It is handled HERE rather than inside `handleObjectVerb` on purpose. That
+ * function is the WRITE dispatcher and the contract surface behind `/mcp`;
+ * this is a read-model shortcut for one admin page, it grants nothing an
+ * `object_list` + `object_get` pair would not, and putting it in the verb
+ * surface would make a page-performance decision into a tool-contract change.
+ * Same reasoning, same shape, as `admin-shell`'s composed sections.
+ */
+const VISUAL_IDENTITY_SNAPSHOT_ACTION = 'visual_identity_snapshot';
 
 const CACHE_CONTROL = 'private, no-cache';
 /**
@@ -149,6 +175,12 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   const parsed = safeJsonParse(event);
   if (!parsed.ok) return jsonResponse(400, { error: 'Invalid request body.' });
+
+  // M3.3 — before the verb schema, because this is not a verb (see above).
+  const requestedAction = (parsed.value as { action?: unknown } | null)?.action;
+  if (requestedAction === VISUAL_IDENTITY_SNAPSHOT_ACTION) {
+    return visualIdentitySnapshotResponse(event, binding);
+  }
 
   const request = objectVerbRequestSchema.safeParse(parsed.value);
   if (!request.success) return jsonResponse(400, { error: 'Invalid request fields.', issues: request.error.issues });
@@ -252,6 +284,45 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   } catch (error) {
     console.error('Admin_Object request failed.', error);
     return jsonResponse(500, { action: request.data.action, error: 'Object request could not be processed.' });
+  }
+};
+
+/**
+ * The `visual_identity_snapshot` answer: every `template`, `section_template`,
+ * `theme` and `visual_standard` record, grouped by type, exactly as the four
+ * `list`s and their `get`s returned them — minus the unbounded history ledger,
+ * which no consumer on that surface reads (`visual-identity/snapshot-doc.ts`
+ * says why it is the one subtraction).
+ *
+ * A missing, stale or wrong-schema snapshot is not an error and is not an
+ * empty answer: `readVisualIdentitySnapshot` rebuilds it from the records —
+ * the same four listings the client used to drive itself — serves the rebuilt
+ * entries and writes them back. Self-healing, no migration, and `index` says
+ * what the call actually cost.
+ *
+ * The body is a pure function of the store's state (`as_of` moves only when a
+ * write does), so the ETag/304 protocol on this file's read verbs applies to
+ * it too: a second visit inside one session costs an empty 304.
+ */
+const visualIdentitySnapshotResponse = async (event: LambdaEvent, binding: SiteBinding) => {
+  try {
+    const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as VisualIdentitySnapshotStore;
+    const result = await readVisualIdentitySnapshot(store, { nowMs: Date.now() });
+    const records: Record<VisualIdentityObjectType, Record<string, unknown>[]> = {
+      template: [],
+      section_template: [],
+      theme: [],
+      visual_standard: [],
+    };
+    for (const entry of result.entries) records[entry.object_type].push(entry.record);
+    for (const type of VISUAL_IDENTITY_OBJECT_TYPES) {
+      records[type].sort((a, b) => String(a.object_id ?? '').localeCompare(String(b.object_id ?? '')));
+    }
+    logDiagnostics('admin-object', result.stats);
+    return readJsonResponse(event, { action: VISUAL_IDENTITY_SNAPSHOT_ACTION, records, as_of: result.as_of, index: result.stats });
+  } catch (error) {
+    console.error('Admin_Object visual-identity snapshot failed.', error);
+    return jsonResponse(500, { action: VISUAL_IDENTITY_SNAPSHOT_ACTION, error: 'The visual identity snapshot could not be read.' });
   }
 };
 

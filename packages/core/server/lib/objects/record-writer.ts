@@ -23,17 +23,32 @@
  *
  * ## The write, in order, and what a crash between steps leaves behind
  *
- * A write is four blob operations and they are ordered so that every interruption
- * is either invisible or self-repairing:
+ * A write is four blob operations — five for the four types that also have a
+ * body snapshot — and they are ordered so that every interruption is either
+ * invisible or self-repairing:
  *
- *   1. **Arm the drift alarm** — `objects/version.seq = index.seq + 1`
- *      (`armObjectIndexWrite`). Nothing has changed yet; the store now merely
- *      says "an index write is owed".
+ *   1. **Arm the drift alarm(s)** — `objects/version.seq = index.seq + 1`
+ *      (`armObjectIndexWrite`), and, for a `template`, `section_template`,
+ *      `theme` or `visual_standard`, `snapshots/visual-identity.json`'s own
+ *      alarm the same way (M3.3). Nothing has changed yet; the store now
+ *      merely says "a projection write is owed".
+ *
+ *      INTEGRATE (wave 2): the visual-identity alarm used to be a SECOND blob,
+ *      `snapshots/visual-identity.version`. It is now the `armed` flag inside
+ *      the snapshot itself, on `snapshots/guarded-doc.ts` — the mechanism
+ *      chats and members already used — so this step reads ONE blob for it
+ *      instead of two. Arming writes a ROWLESS stub, which is why an
+ *      interrupted write costs the next reader a rebuild rather than a stale
+ *      list: an armed document has nothing in it to be stale.
  *   2. **The record blob.** Durable BEFORE anything claims it exists.
  *   3. **The status-index marker** (`objects/<type>/index/by-status/<status>/<id>`),
  *      and, when the status moved, the removal of the marker it moved from.
  *   4. **The derived index row**, compare-and-swapped into `objects/index.json` at
  *      the seq step 1 armed — which is exactly what disarms the alarm.
+ *   5. **The record body**, compare-and-swapped into
+ *      `snapshots/visual-identity.json` at the seq step 1 armed for it, which
+ *      disarms the second alarm. Skipped entirely — no read, no write — for the
+ *      other object types, which that snapshot does not hold.
  *
  * Crash after 1: the alarm is up and no record changed. The next inventory read
  * sees `version.seq > index.seq`, refuses to trust the index, runs the verified
@@ -49,7 +64,31 @@
  * Crash after 3: as above, plus a marker that the sweep and the purge both read as
  * the truth they already expect. Harmless.
  *
- * Crash after 4: nothing is owed. The pair agrees and the row is current.
+ * Crash after 4: the index pair agrees and the row is current; the
+ * visual-identity snapshot is still armed, so the next read of that surface
+ * rebuilds from the four listings and repairs. Crash after 5: nothing is owed
+ * anywhere.
+ *
+ * WHAT STEP 5 COSTS, stated because it grew: this blob holds BODIES, so the
+ * write is O(records of the four types) — 21 KB on drlurie's thirteen, ~240 KB
+ * on a tenant with ten times as many. A `visual_standard` edit on a tenant with
+ * many templates therefore rewrites every template body to record a change to
+ * neither. That is bounded by the recipe count and not by edit history (the
+ * ledger is dropped — `projectVisualIdentityEntry`), it is on a human-rate
+ * path, and `visual-identity/snapshot-store.ts`'s SIZE note states the
+ * per-type split to make at ~1 MB. It is the one step of this write whose cost
+ * is not O(1), and a reader between steps 1 and 5 pays a rebuild.
+ *
+ * INTEGRATE (wave 2): the one caller where that cost MULTIPLIES is
+ * `membership/offboarding.ts:releaseLocksHeldBy`, which force-checks-in every
+ * lock a departing person holds by calling `putObjectRecord` once per record,
+ * serially. Before this snapshot existed each of those iterations rewrote one
+ * small index document; now, for each record of the four visual-identity
+ * types, it also reads and rewrites the whole body snapshot. Bounded by the
+ * number of locks one person held, on a path a human triggers once per
+ * offboarding, and correct at every step (each arm reads the document the
+ * previous commit left). `deleteObjectRecords` below shows the shape to reach
+ * for if it ever stops being cheap: one arm, n mutations, one commit.
  *
  * A concurrent second writer loses a compare-and-swap — at step 1 if the other
  * writer armed first, at step 4 if both armed off the same index — writes no row,
@@ -90,6 +129,21 @@ import {
   projectIndexEntry,
   type ObjectIndexDocStore,
 } from './index-doc.js';
+/**
+ * M3.3 — the LEAF spelling, and load bearing that it stays leaf. The same
+ * names re-export from `visual-identity/snapshot-store.js`, which also carries
+ * the rebuild and therefore `blob-list.ts` and four `store.list()` calls: code
+ * this choke point can never execute, in a module graph that `admin-users`
+ * pays for (`membership/offboarding.ts` is a caller of this file).
+ */
+import {
+  armVisualIdentitySnapshotWrite,
+  commitVisualIdentitySnapshotEntries,
+  isVisualIdentityObjectType,
+  projectVisualIdentityEntry,
+  type VisualIdentitySnapshotDocStore,
+  type VisualIdentitySnapshotLease,
+} from '../visual-identity/snapshot-doc.js';
 import type { ObjectRecord, ObjectType } from '../../../schema/object-record-v1.js';
 
 /**
@@ -97,10 +151,32 @@ import type { ObjectRecord, ObjectType } from '../../../schema/object-record-v1.
  * `delete`/`del` are optional and probed at runtime because the fleet's store
  * handles spell it both ways (`@netlify/blobs` uses `delete`, the local shim `del`).
  */
-export type ObjectRecordWriteStore = ObjectIndexDocStore & {
-  delete?(key: string): Promise<unknown>;
-  del?(key: string): Promise<unknown>;
-};
+export type ObjectRecordWriteStore = ObjectIndexDocStore &
+  VisualIdentitySnapshotDocStore & {
+    delete?(key: string): Promise<unknown>;
+    del?(key: string): Promise<unknown>;
+  };
+
+/**
+ * M3.3 — the second projection this choke point maintains.
+ *
+ * `/admin/settings/visual-identity` read the BODIES of four object types over
+ * seventeen `admin-object` invocations; they are materialised into
+ * `snapshots/visual-identity.json` instead, and this is the only place that
+ * blob is amended. It has its OWN alarm doc rather than a second meaning for
+ * `objects/version`, because that counter moves on every record write of every
+ * type — one `content_item` edit would otherwise invalidate the
+ * visual-identity bodies. A type outside the four costs this file one
+ * predicate call and no blob operation at all.
+ */
+const armSnapshotFor = async (
+  store: ObjectRecordWriteStore,
+  types: readonly ObjectType[],
+  nowMs: number
+): Promise<VisualIdentitySnapshotLease | undefined> =>
+  types.some((type) => isVisualIdentityObjectType(type))
+    ? armVisualIdentitySnapshotWrite(store, nowMs)
+    : undefined;
 
 const deleteKey = async (store: ObjectRecordWriteStore, key: string): Promise<void> => {
   const remove = typeof store.delete === 'function' ? store.delete.bind(store) : store.del?.bind(store);
@@ -119,6 +195,12 @@ export type PutObjectRecordResult = {
    * the next read pays one verified sweep and repairs.
    */
   index_committed: boolean;
+  /**
+   * M3.3 — the same answer for `snapshots/visual-identity.json`. Always
+   * `false` for every other object type, which is not a refusal: there was
+   * nothing owed.
+   */
+  snapshot_committed: boolean;
 };
 
 /**
@@ -137,8 +219,13 @@ export const putObjectRecord = async (
   const key = objectRecordKey(record.object_type, record.object_id);
   const status: ObjectRecordStatus = record.status;
 
-  // 1 — arm.
-  const lease = await armObjectIndexWrite(store, nowMs);
+  // 1 — arm. Both alarms go up together and both go up BEFORE the record
+  // moves: concurrently because they are independent documents, but strictly
+  // ahead of step 2, which is the ordering the whole crash analysis rests on.
+  const [lease, snapshotLease] = await Promise.all([
+    armObjectIndexWrite(store, nowMs),
+    armSnapshotFor(store, [record.object_type], nowMs),
+  ]);
 
   // 2 — the record, durable before anything claims it exists.
   const written = (await store.setJSON(key, record)) as void | { etag?: string };
@@ -171,7 +258,19 @@ export const putObjectRecord = async (
     await disarmRefused(store, lease, nowMs);
   }
 
-  return { key, etag, index_committed };
+  // 5 — the visual-identity body, compare-and-swapped, which disarms that
+  // snapshot's own alarm. Independent of step 4's outcome on purpose: that projection
+  // caches an etag-VERIFIED row and cannot be written without the record's
+  // etag, while this one caches the body itself and does not care what the
+  // store could report about it.
+  const snapshot_committed = snapshotLease
+    ? await commitVisualIdentitySnapshotEntries(store, snapshotLease, {
+        upserts: [projectVisualIdentityEntry(key, record)],
+        nowMs,
+      })
+    : false;
+
+  return { key, etag, index_committed, snapshot_committed };
 };
 
 export type ObjectRecordRef = {
@@ -199,16 +298,28 @@ export const deleteObjectRecords = async (
   store: ObjectRecordWriteStore,
   refs: readonly ObjectRecordRef[],
   options: { nowMs?: number } = {}
-): Promise<{ deleted: number; index_committed: boolean }> => {
-  if (refs.length === 0) return { deleted: 0, index_committed: false };
+): Promise<{ deleted: number; index_committed: boolean; snapshot_committed: boolean }> => {
+  if (refs.length === 0) return { deleted: 0, index_committed: false, snapshot_committed: false };
   const nowMs = options.nowMs ?? Date.now();
 
-  const lease = await armObjectIndexWrite(store, nowMs);
+  // M3.3: one arm per projection for the whole batch, and the visual-identity
+  // one only when the batch actually touches one of its four types — a purge
+  // of fifty archived articles pays nothing for a snapshot it cannot change.
+  const [lease, snapshotLease] = await Promise.all([
+    armObjectIndexWrite(store, nowMs),
+    armSnapshotFor(
+      store,
+      refs.map((ref) => ref.object_type),
+      nowMs
+    ),
+  ]);
 
   const removals: string[] = [];
+  const snapshotRemovals: string[] = [];
   for (const ref of refs) {
     const key = objectRecordKey(ref.object_type, ref.object_id);
     removals.push(key);
+    if (isVisualIdentityObjectType(ref.object_type)) snapshotRemovals.push(key);
     await deleteKey(store, key);
     for (const status of ref.statuses ?? (['active', 'archived'] as const)) {
       await deleteKey(store, objectStatusIndexKey(ref.object_type, status, ref.object_id));
@@ -216,7 +327,10 @@ export const deleteObjectRecords = async (
   }
 
   const index_committed = await commitObjectIndexEntries(store, lease, { removals, nowMs });
-  return { deleted: refs.length, index_committed };
+  const snapshot_committed = snapshotLease
+    ? await commitVisualIdentitySnapshotEntries(store, snapshotLease, { removals: snapshotRemovals, nowMs })
+    : false;
+  return { deleted: refs.length, index_committed, snapshot_committed };
 };
 
 /** One-record convenience over `deleteObjectRecords`. */
@@ -224,7 +338,8 @@ export const deleteObjectRecord = async (
   store: ObjectRecordWriteStore,
   ref: ObjectRecordRef,
   options: { nowMs?: number } = {}
-): Promise<{ deleted: number; index_committed: boolean }> => deleteObjectRecords(store, [ref], options);
+): Promise<{ deleted: number; index_committed: boolean; snapshot_committed: boolean }> =>
+  deleteObjectRecords(store, [ref], options);
 
 /**
  * Archive a record: the retire verb's spelling of `putObjectRecord`.

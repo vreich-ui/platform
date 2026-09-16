@@ -16,7 +16,7 @@ create-site plan for 'acme' (Acme)
   theme id:       thm_acme_default
   canonical host: https://kugel-acme.netlify.app
 
-Files to create under sites/acme/ (107):
+Files to create under sites/acme/ (109):
   + sites/acme/config/site-identity.ts
   + sites/acme/config/site-binding.ts
   + sites/acme/config/approval-policy.ts
@@ -89,6 +89,7 @@ Files to create under sites/acme/ (107):
   + sites/acme/netlify/functions/admin-visual-identity-propose.ts
   + sites/acme/netlify/functions/admin-visual-identity-regenerate-examples.ts
   + sites/acme/netlify/functions/admin-visual-identity-render-sample.ts
+  + sites/acme/netlify/functions/analytics-snapshot-warm.ts
   + sites/acme/netlify/functions/artifact-upload.ts
   + sites/acme/netlify/functions/checkout-session-status.ts
   + sites/acme/netlify/functions/claim-free.ts
@@ -99,6 +100,7 @@ Files to create under sites/acme/ (107):
   + sites/acme/netlify/functions/get-public-image.ts
   + sites/acme/netlify/functions/get-public-pdf.ts
   + sites/acme/netlify/functions/get-purchase.ts
+  + sites/acme/netlify/functions/governance-probe-refresh.ts
   + sites/acme/netlify/functions/mcp.ts
   + sites/acme/netlify/functions/mcp-keepalive.ts
   + sites/acme/netlify/functions/mcp-oauth.ts
