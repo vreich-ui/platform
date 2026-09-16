@@ -6,6 +6,7 @@
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { CandidateSetView } from './candidate-choice.js';
 import type { Blockage } from './blockage.js';
+import type { ChatCreateOrigin, ChatSendOrigin } from './chat-origin.js';
 
 const ENDPOINT = '/.netlify/functions/admin-agent-chat';
 
@@ -129,19 +130,37 @@ async function post<T>(getToken: GetToken, body: Record<string, unknown>, signal
   return json as T;
 }
 
-export const createObjectChat = (getToken: GetToken, objectType: string, objectId: string, title?: string) =>
+/**
+ * CHAT-ORIGIN: `origin` is where the conversation came from — the surface slug
+ * (`chat-origin.ts`'s `chatCreateOrigin()`, derived from the route, never
+ * hand-typed) and the hub starter when one seeded it. Stored ONCE on the chat
+ * doc at creation and immutable afterwards: a conversation is opened from one
+ * place, and a later send from a second tab does not rewrite where it began.
+ *
+ * Optional at every call site, so a surface that has not been taught to pass it
+ * behaves exactly as it does today.
+ */
+export const createObjectChat = (
+  getToken: GetToken,
+  objectType: string,
+  objectId: string,
+  title?: string,
+  origin?: ChatCreateOrigin
+) =>
   post<{ chat: ChatSummaryView; existed: boolean }>(getToken, {
     action: 'create_chat',
     kind: 'object',
     object_type: objectType,
     object_id: objectId,
     ...(title ? { title } : {}),
+    ...(origin ? { origin } : {}),
   });
 
-export const createFreeChat = (getToken: GetToken, title?: string) =>
+export const createFreeChat = (getToken: GetToken, title?: string, origin?: ChatCreateOrigin) =>
   post<{ chat: ChatSummaryView; existed: boolean }>(getToken, {
     action: 'create_chat',
     kind: 'free',
+    ...(origin ? { origin } : {}),
     ...(title ? { title } : {}),
   });
 
@@ -176,7 +195,17 @@ export const sendChatMessage = (
   text: string,
   focus?: string,
   /** Owner-only test mode. A REQUEST: the server re-derives roles and ignores it for anyone else. */
-  testMode = false
+  testMode = false,
+  /**
+   * CHAT-ORIGIN, the per-send half: the editorial request / workflow run this
+   * turn is about, and the dock's selection when the chat is not itself
+   * object-bound. Stamped onto the run the send starts — a run is minted per
+   * send, so this is per-send by construction.
+   *
+   * A HINT, never authority: the server prefers the request binding it
+   * resolves itself, and every tool call re-derives rights regardless.
+   */
+  origin?: ChatSendOrigin
 ) =>
   post<{ chat_id: string; run_id: string }>(getToken, {
     action: 'send',
@@ -184,6 +213,7 @@ export const sendChatMessage = (
     text,
     ...(focus ? { focus } : {}),
     ...(testMode ? { test_mode: true } : {}),
+    ...(origin ? { origin } : {}),
   });
 
 export const chooseCandidate = (getToken: GetToken, chatId: string, callId: string, candidateId: string) =>

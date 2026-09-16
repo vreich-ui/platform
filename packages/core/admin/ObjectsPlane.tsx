@@ -25,6 +25,7 @@ import { ConfirmDialog, Drawer, useToast } from './overlays';
 import { AgentRail, useAgentDock } from './AgentRail';
 import { useChat, type UseChatState } from './chat';
 import { createObjectChat, sendChatMessage } from '@core/lib/admin/chat-client';
+import { chatCreateOrigin } from '@core/lib/admin/chat-origin';
 import { parseFocus, type ObjectSelection } from '@core/lib/admin/object-selection';
 import { WORKSPACE_EXPANDED_MIN_WIDTH } from '@core/lib/admin/responsive-workspace';
 import {
@@ -596,7 +597,8 @@ function ObjectsPlaneBody({ roles }: { roles: readonly string[] }) {
             getToken,
             bound.object_type,
             bound.object_id,
-            focusedRow?.display_name
+            focusedRow?.display_name,
+            chatCreateOrigin()
           );
           chatId = created.chat.chat_id;
           setChatCache((cache) => rememberDockChat(cache, bound, created.chat.chat_id));

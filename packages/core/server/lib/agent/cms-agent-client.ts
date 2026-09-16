@@ -415,6 +415,35 @@ export type CmsAgentContext = {
    * deployment that already accepts it; `cmsAgentEngine` owns that gate.
    */
   ui_capabilities?: UiCapabilities;
+  /**
+   * CHAT-ORIGIN, additive and live at agent rev `MIN_AGENT_REV_FOR_ORIGIN`
+   * (engine.ts): where this conversation came from, which Client Manager rev 9
+   * renders as its "What this chat is about" block. Absent means "Platform did
+   * not say", which is what every turn before this change said.
+   *
+   * The same `.strict()` rule as `ui_capabilities` above applies, for the same
+   * reason: a field sent one rev too early is `invalid_turn_request` and burns
+   * the `turn_id`. `cmsAgentEngine` owns the gate.
+   */
+  origin?: TurnOrigin;
+};
+
+/**
+ * CHAT-ORIGIN — the wire shape, mirroring CMS-Agent's `conversationContract.ts`
+ * exactly. NOT to be widened here: a field this side invents is an unrecognized
+ * key upstream, which is a burned turn, not a no-op.
+ */
+export type TurnOrigin = {
+  /** Short route-derived slug: 'agents' | 'objects' | 'requests' | 'object-workspace' | 'inventory' | 'home' | 'visual-identity' | 'templates' | … */
+  surface: string;
+  /** `AgentStarter.key`, when the chat was opened from a hub starter. */
+  starter?: string;
+  /** The editorial request this chat is about, when known. */
+  request_id?: string;
+  /** The workflow run, when known. */
+  run_id?: string;
+  /** The ASV2 dock selection — only when the chat is not already object-bound. */
+  selection?: { object_type: string; object_id: string };
 };
 
 export type CmsAgentConstraints = { max_tokens: number; timeout_ms: number };
@@ -495,6 +524,39 @@ export const dropOverBoundsUiCapabilities = (request: CmsAgentConverseRequest): 
       actions: manifest?.actions.length ?? 0,
       chars: serializedLength(manifest),
       bounds: UI_CAPABILITIES_BOUNDS,
+    })
+  );
+  return { ...request, context };
+};
+
+/**
+ * CHAT-ORIGIN — the same "drop, never fail" rule as the manifest above, for
+ * the same reason and with an even clearer trade: `origin` is a hint about
+ * what the conversation is about, so a turn without it degrades to exactly
+ * what every turn sent before this change, while a turn REJECTED for an
+ * over-long hint costs the editor their answer and burns the `turn_id`.
+ *
+ * The bound is Platform's own, deliberately generous: every component of the
+ * shape is an id or a slug that this repo mints (a surface slug, a starter
+ * key, a `req_*`, a run id, an object pair), so exceeding it means something
+ * upstream is wrong, not that an editor typed a long sentence.
+ */
+export const ORIGIN_BOUNDS = { maxChars: 1000 } as const;
+
+export const originWithinBounds = (value: TurnOrigin | undefined): boolean =>
+  value === undefined || serializedLength(value) <= ORIGIN_BOUNDS.maxChars;
+
+/** Return a request whose `context.origin` is within bounds or absent — never truncated. */
+export const dropOverBoundsOrigin = (request: CmsAgentConverseRequest): CmsAgentConverseRequest => {
+  const origin = request.context.origin;
+  if (originWithinBounds(origin)) return request;
+  const { origin: _dropped, ...context } = request.context;
+  console.warn(
+    JSON.stringify({
+      event: 'cms_agent_origin_dropped',
+      turn_id: request.turn_id,
+      chars: serializedLength(origin),
+      bounds: ORIGIN_BOUNDS,
     })
   );
   return { ...request, context };
@@ -981,7 +1043,7 @@ export class CmsAgentClient {
   async converse(input: CmsAgentConverseRequest): Promise<CmsAgentResult<CmsAgentConverseResponse>> {
     // §7: an over-bounds manifest is dropped, not truncated, and the turn
     // still goes — before the bounds check, so nothing about it can reject.
-    const request = dropOverBoundsUiCapabilities(input);
+    const request = dropOverBoundsOrigin(dropOverBoundsUiCapabilities(input));
     const bounds = checkConverseBounds(request);
     if (bounds) return { ok: false, ...bounds };
     return this.callTool<CmsAgentConverseResponse>('agent_converse', { ...request });

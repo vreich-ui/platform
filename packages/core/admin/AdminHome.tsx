@@ -6,6 +6,7 @@ import { Badge, Button, Card, EmptyState, RefreshingChip, Skeleton } from './pri
 import { IconExternalLink, IconFilePlus, IconLibrary, IconPalette, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { createFreeChat, sendChatMessage } from '@core/lib/admin/chat-client';
+import { chatCreateOrigin } from '@core/lib/admin/chat-origin';
 import { rowStatus, type LibraryRow } from '@core/lib/admin/library-logic';
 import {
   fetchEditorialView,
@@ -52,7 +53,7 @@ function FoundationSlot({
       : rowStatus(primary as LibraryRow)
     : undefined;
   const create = async () => {
-    const { chat } = await createFreeChat(token, `Create ${label}`);
+    const { chat } = await createFreeChat(token, `Create ${label}`, chatCreateOrigin());
     await sendChatMessage(token, chat.chat_id, prompt);
     void navigate(`/admin/agents?chat=${encodeURIComponent(chat.chat_id)}`);
   };

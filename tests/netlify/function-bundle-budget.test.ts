@@ -301,7 +301,19 @@ const BUDGETS_KB: Record<string, number> = {
   // buy 3 KB would trade the reason a sweep silently retired nothing for a
   // number. Re-measured: 3522 KB / 262 modules, so this is 14 KB of headroom,
   // and the next wave that eats it should look for a real edge first.
-  'admin-agent-chat': 3536,
+  //
+  // 3536 -> 3552 (CHAT-ORIGIN, 2026-09-16). Looked for the edge first, as the
+  // note above asks, and there is none: the module SET is byte-for-byte the
+  // same 263 modules before and after this change (measured off the metafile
+  // on the same tree, HEAD vs. working copy — 3530 KB -> 3543 KB). The client
+  // helper that derives the surface slug (`lib/admin/chat-origin.ts`) is
+  // browser-side and is deliberately NOT reachable from this function; what
+  // grew is `context.origin` plumbing and its comments inside five modules
+  // already in the graph (engine.ts, chat-store.ts, cms-agent-client.ts,
+  // loop.ts, admin-agent-chat.ts). Most of those bytes explain why a field
+  // sent one agent rev too early burns the turn_id permanently — the single
+  // most expensive thing to relearn on this wire. 9 KB of headroom.
+  'admin-agent-chat': 3552,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */

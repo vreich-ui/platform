@@ -8,6 +8,7 @@ import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
 import { IconLibrary, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { createFreeChat } from '@core/lib/admin/chat-client';
+import { chatCreateOrigin } from '@core/lib/admin/chat-origin';
 import { fetchStudioData, type StudioRecord } from '@core/lib/admin/studio-client';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import type { EditorialArtifact, EditorialAssetsPayload, PdfTemplateSummary } from '@core/lib/admin/editorial-assets';
@@ -114,7 +115,7 @@ function PdfTemplateRoom({
       setChatId(existing);
       return;
     }
-    createFreeChat(getToken, `PDF template: ${template.label}`)
+    createFreeChat(getToken, `PDF template: ${template.label}`, chatCreateOrigin())
       .then(({ chat: created }) => {
         sessionStorage.setItem(key, created.chat_id);
         setChatId(created.chat_id);

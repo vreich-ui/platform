@@ -46,6 +46,7 @@ import { fetchGovernance } from '@core/lib/admin/governance-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { useCachedResource } from '@core/lib/admin/use-cached-resource';
 import { createFreeChat, sendChatMessage, type ChatStatus } from '@core/lib/admin/chat-client';
+import { chatCreateOrigin } from '@core/lib/admin/chat-origin';
 import type { Blockage } from '@core/lib/admin/blockage';
 import {
   VISUAL_IDENTITY_CHAT_SCOPE,
@@ -865,7 +866,7 @@ function useDockedVisualIdentityChat(siteId: string, enabled: boolean, opened: b
     let cancelled = false;
     dispatch({ type: 'minting' });
     const seed = dockedChatSeed('visual-identity', 'Visual identity');
-    createFreeChat(getToken, seed.title)
+    createFreeChat(getToken, seed.title, chatCreateOrigin())
       .then(async ({ chat: created }) => {
         // Cache before the cancellation check: the chat EXISTS now, and a
         // remount must re-attach to it rather than mint a second one.

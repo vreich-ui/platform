@@ -34,6 +34,7 @@ import {
   type PendingView,
   type RunSummaryView,
 } from '@core/lib/admin/chat-client';
+import { chatSendOrigin, type ChatSendOrigin } from '@core/lib/admin/chat-origin';
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
 // T1.1: `currentPageSignal()` is read fresh on every poll tick — never
@@ -155,7 +156,18 @@ const WRITE_TOOLS = new Set([
   'get_agent_artifact_job_status',
 ]);
 
-export function useChat(getToken: GetToken, chatId: string | undefined): UseChatState {
+/**
+ * CHAT-ORIGIN (per-send half). `sendOrigin` is what the HOST knows and this
+ * hook cannot: the workflow run the surface is watching (`AgentsHub`, from the
+ * run card's `onRunResolved`) and the dock's current selection. The request id
+ * this hook supplies itself — it already holds the server-resolved binding
+ * (`request`), which is the same fact from a better source.
+ *
+ * Read through a ref so a selection change never re-creates `send` (and so
+ * never re-runs a consumer's effect that depends on it); the ref is refreshed
+ * after every render, long before any click can read it.
+ */
+export function useChat(getToken: GetToken, chatId: string | undefined, sendOrigin?: ChatSendOrigin): UseChatState {
   const [status, setStatus] = useState<ChatStatus | undefined>(undefined);
   const [events, setEvents] = useState<ChatEventView[]>([]);
   const [pending, setPending] = useState<PendingView | undefined>(undefined);
@@ -182,9 +194,16 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   const claimRef = useRef(createApprovalClaim());
   /** The pending call, mirrored in a ref so a decision callback can name the tool in its receipt without re-creating itself on every poll. */
   const pendingRef = useRef<PendingView | undefined>(undefined);
+  /** CHAT-ORIGIN: the host's per-send origin, and this chat's kind (an object chat never sends a selection). */
+  const sendOriginRef = useRef<ChatSendOrigin | undefined>(sendOrigin);
+  const chatKindRef = useRef<'object' | 'free' | undefined>(undefined);
+  useEffect(() => {
+    sendOriginRef.current = sendOrigin;
+  });
 
   const ingest = useCallback((view: ChatView) => {
     setStatus(view.status);
+    chatKindRef.current = view.kind;
     pendingRef.current = view.pending;
     setPending(view.pending);
     setCandidateSet(view.candidate_set);
@@ -274,6 +293,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     setPreviewCandidateId(undefined);
     setRequest(undefined);
     requestRef.current = undefined;
+    chatKindRef.current = undefined;
     setLastOutcome(undefined);
     setLastEventAtMs(undefined);
     claimRef.current = createApprovalClaim();
@@ -288,6 +308,26 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     if (timerRef.current) clearTimeout(timerRef.current);
     void poll();
   }, [poll]);
+
+  /**
+   * CHAT-ORIGIN: the origin for the send about to go out. The request id comes
+   * from the binding this hook already holds (the server resolved it); the run
+   * id and selection come from the host. The selection is dropped for an object
+   * chat — that pair rides `context.object_type`/`object_id` already, and
+   * repeating it would read as a new pick. The server enforces the same rule;
+   * this is the cheap half of it, one round trip earlier.
+   */
+  const currentSendOrigin = useCallback(() => {
+    const host = sendOriginRef.current ?? {};
+    // The binding wins over the host's guess for the request id: same fact,
+    // resolved server-side. The selection is dropped whole for an object chat.
+    const requestId = requestRef.current?.request_id ?? host.request_id;
+    return chatSendOrigin({
+      ...(requestId ? { request_id: requestId } : {}),
+      ...(host.run_id ? { run_id: host.run_id } : {}),
+      ...(host.selection && chatKindRef.current !== 'object' ? { selection: host.selection } : {}),
+    });
+  }, []);
 
   const wrap = useCallback(
     async (fn: () => Promise<unknown>) => {
@@ -373,7 +413,8 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     busy,
     writeStamp,
     pendingConsumed: pending !== undefined && claimRef.current.has(pending.call_id),
-    send: (text, focus, testMode) => wrap(() => sendChatMessage(getToken, chatId!, text, focus, testMode)),
+    send: (text, focus, testMode) =>
+      wrap(() => sendChatMessage(getToken, chatId!, text, focus, testMode, currentSendOrigin())),
     preview: setPreviewCandidateId,
     chooseCandidate: (candidateId) => {
       const callId = candidateSet?.call_id;

@@ -27,6 +27,7 @@ import {
   type CmsAgentClient,
   type CmsAgentContext,
   type CmsAgentError,
+  type TurnOrigin,
 } from './cms-agent-client.js';
 import { isMembershipTool } from '../mcp-tool-definitions-membership.js';
 import { buildUiCapabilities } from '../../../lib/admin/ui-capabilities.js';
@@ -236,6 +237,55 @@ export const MIN_AGENT_REV_FOR_UI_CAPABILITIES = 8;
 export const uiCapabilitiesAllowedAtRev = (rev: unknown): boolean =>
   typeof rev === 'number' && Number.isFinite(rev) && rev >= MIN_AGENT_REV_FOR_UI_CAPABILITIES;
 
+/**
+ * CHAT-ORIGIN — the SECOND field to ride this handshake, and it rides it for
+ * exactly the reasons written above `MIN_AGENT_REV_FOR_UI_CAPABILITIES`: the
+ * upstream `conversationContextSchema` is `.strict()`, the idempotency claim is
+ * written before validation, so a field sent one rev too early does not degrade
+ * — it burns the `turn_id` and the editor loses the turn.
+ *
+ * 9 is the rev at which `client_manager` accepts `context.origin` and renders
+ * its "What this chat is about" block (CMS-Agent rev 9, merged and deployed).
+ * `>=` for the same reason as the manifest's gate: seeding bumps a stored
+ * agent's rev, so a deployed workspace lands at rev >= 9 without the exact
+ * number being guaranteed, and an unknown rev reads as below the gate.
+ */
+export const MIN_AGENT_REV_FOR_ORIGIN = 9;
+
+/** Whether this turn may carry the origin block. Pure, so the gate is testable on both sides. */
+export const originAllowedAtRev = (rev: unknown): boolean =>
+  typeof rev === 'number' && Number.isFinite(rev) && rev >= MIN_AGENT_REV_FOR_ORIGIN;
+
+/**
+ * CHAT-ORIGIN — the stored facts, as the wire shape.
+ *
+ * Reads ONLY what `create_chat` and `send` stamped (`chat-store.ts`); nothing
+ * here derives, guesses or widens. `undefined` when the chat knows nothing,
+ * which is every chat created before this change and therefore the honest
+ * answer for them.
+ *
+ * The `'admin'` fallback exists for one case: a chat doc minted BEFORE this
+ * change (no `origin_surface`) whose next send resolves a request binding. The
+ * surface is required on the wire, and "some admin surface" is true, where
+ * dropping the request id the editor is actually asking about is a real loss.
+ * It mirrors `lib/admin/chat-origin.ts`'s own unknown-route answer.
+ */
+export const buildTurnOrigin = (doc: ChatDoc, run: ChatRun): TurnOrigin | undefined => {
+  const rest = {
+    ...(doc.origin_starter ? { starter: doc.origin_starter } : {}),
+    ...(run.origin_request_id ? { request_id: run.origin_request_id } : {}),
+    ...(run.origin_run_id ? { run_id: run.origin_run_id } : {}),
+    // Constraint 7's sibling: an object chat already sends the pair as
+    // `object_type`/`object_id`, so a "selection" there would be the same fact
+    // twice and would read as a NEW pick. The server drops it at send; this is
+    // the second gate, for docs stamped before that rule existed.
+    ...(run.origin_selection && doc.kind !== 'object' ? { selection: run.origin_selection } : {}),
+  };
+  const surface = doc.origin_surface ?? (Object.keys(rest).length > 0 ? 'admin' : undefined);
+  if (!surface) return undefined;
+  return { surface, ...rest };
+};
+
 const conversationContext = (
   doc: ChatDoc,
   run: ChatRun,
@@ -262,7 +312,13 @@ const conversationContext = (
   ...(uiCapabilitiesAllowedAtRev(agentRev)
     ? { ui_capabilities: buildUiCapabilities(doc.kind === 'object' ? doc.object_type : undefined, roles) }
     : {}),
+  // CHAT-ORIGIN §: gated on rev 9 exactly like the manifest is on rev 8, and
+  // omitted entirely when the chat knows nothing about where it came from.
+  ...(originAllowedAtRev(agentRev) ? withOrigin(buildTurnOrigin(doc, run)) : {}),
 });
+
+/** `{ origin }` or `{}` — keeps the spread above readable and the field truly absent when unknown. */
+const withOrigin = (origin: TurnOrigin | undefined): { origin?: TurnOrigin } => (origin ? { origin } : {});
 
 /**
  * One `agent_converse` turn per loop iteration.
@@ -439,8 +495,8 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
         continue;
       }
       /**
-       * ASV2-W4.3 — the gate's backstop, and the same shape as the tool-bound
-       * fallback above (T19.8), for the same reason.
+       * ASV2-W4.3 (and CHAT-ORIGIN) — the rev gates' backstop, and the same
+       * shape as the tool-bound fallback above (T19.8), for the same reason.
        *
        * `rev` is a property of the STORED AGENT RECORD; accepting
        * `ui_capabilities` is a property of the DEPLOYED SERVICE CODE. They move
@@ -460,17 +516,29 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
        * If the real cause was something else, the retry fails the same way and
        * the error surfaces.
        */
-      if (result.code === 'invalid_turn_request' && !retriedWithoutManifest && context.ui_capabilities) {
+      if (
+        result.code === 'invalid_turn_request' &&
+        !retriedWithoutManifest &&
+        (context.ui_capabilities || context.origin)
+      ) {
         retriedWithoutManifest = true;
-        const { ui_capabilities: _rejected, ...withoutManifest } = context;
-        context = withoutManifest;
+        // CHAT-ORIGIN: BOTH rev-gated fields go, in the SAME single retry.
+        // One retry, not two: the second rejection would burn a second
+        // turn_id to learn what the first already told us — that this
+        // deployment's schema does not match the rev it reports. Whichever of
+        // the two it actually choked on, the turn goes without either and the
+        // editor still gets an answer.
+        const { ui_capabilities: _rejectedManifest, origin: _rejectedOrigin, ...withoutGatedFields } = context;
+        context = withoutGatedFields;
         turnId = `${baseTurnId}_nouc`;
         console.warn(
           JSON.stringify({
-            event: 'cms_agent_ui_capabilities_rejected',
+            event: 'cms_agent_gated_context_rejected',
             run_id: run.run_id,
             agent_rev: agentRev,
-            min_rev: MIN_AGENT_REV_FOR_UI_CAPABILITIES,
+            dropped: [...(_rejectedManifest ? ['ui_capabilities'] : []), ...(_rejectedOrigin ? ['origin'] : [])],
+            min_rev_ui_capabilities: MIN_AGENT_REV_FOR_UI_CAPABILITIES,
+            min_rev_origin: MIN_AGENT_REV_FOR_ORIGIN,
           })
         );
         continue;
@@ -499,8 +567,8 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
            * turn. The drop is one-way for the life of the run.
            */
           if (retriedWithoutManifest) {
-            const { ui_capabilities: _stillRejected, ...withoutManifest } = context;
-            context = withoutManifest;
+            const { ui_capabilities: _stillRejected, origin: _originStillRejected, ...withoutGatedFields } = context;
+            context = withoutGatedFields;
           }
         }
         turnId = `${baseTurnId}_r1`;

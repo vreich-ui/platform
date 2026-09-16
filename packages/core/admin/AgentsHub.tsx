@@ -29,6 +29,7 @@ import {
   IconSparkles,
 } from './icons';
 import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
+import { chatCreateOrigin } from '@core/lib/admin/chat-origin';
 import { createdObjectsFromEvents } from '@core/lib/admin/chat-logic';
 import { objectIdFromEvents } from '@core/lib/admin/chat-liveness';
 import { railVisible } from '@core/lib/admin/hub-focus';
@@ -328,7 +329,18 @@ function HubBody() {
   }, [activeId]);
   const [pendingStarter, setPendingStarter] = useState<string | undefined>(undefined);
   const requestedStarterHandled = useRef(false);
-  const chat = useChat(getToken, activeId);
+  /**
+   * CHAT-ORIGIN: the workflow run this conversation is about. The run card
+   * below resolves it (a chat knows a run before a request row exists), and it
+   * is the one half of the origin the server cannot resolve for itself — the
+   * editorial-request index row carries no run id. The request id is the
+   * binding, which `useChat` supplies from its own poll.
+   */
+  const [boundRunId, setBoundRunId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setBoundRunId(undefined);
+  }, [activeId]);
+  const chat = useChat(getToken, activeId, boundRunId ? { run_id: boundRunId } : undefined);
   /** B2: the run card's Retry, wired the same way on all four surfaces. */
   const retryRun = useRetryRequest();
 
@@ -367,7 +379,10 @@ function HubBody() {
   const startConversation = async (starter: AgentStarter) => {
     setPendingStarter(starter.key);
     try {
-      const { chat: created } = await createFreeChat(getToken, starter.label);
+      // CHAT-ORIGIN: the surface comes from the route this hub is mounted on;
+      // the starter key is what makes "the editor pressed New article" a fact
+      // Client Manager can act on instead of a prompt it has to infer.
+      const { chat: created } = await createFreeChat(getToken, starter.label, chatCreateOrigin(starter.key));
       setActiveId(created.chat_id);
       // Seed the conversation once the chat exists.
       const { sendChatMessage } = await import('@core/lib/admin/chat-client');
@@ -603,6 +618,9 @@ function HubBody() {
                   isOwner={owner}
                   {...(chat.status ? { chatStatus: chat.status } : {})}
                   onStatesStatusChange={setRunCardStatesStatus}
+                  // CHAT-ORIGIN: the run this chat is about, once the card has
+                  // resolved it — carried on the next send's `context.origin`.
+                  onRunResolved={setBoundRunId}
                   onRetry={() => void retryRun(chat.request!.request_id)}
                   // E3b/FIX 2: the binding when the client holds one, else the
                   // newest `request_progress` event that names the object. The

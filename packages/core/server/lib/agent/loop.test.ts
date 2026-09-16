@@ -360,3 +360,92 @@ describe('E2c — a generated-registry creation stamps its object through the re
     assert.deepEqual(doc!.runs.at(-1)?.chips, ['created 1 object']);
   });
 });
+
+// ─── CHAT-ORIGIN: what the run is about, frozen at send ─────────────────────
+
+describe('startRun — the per-send origin', () => {
+  const originDeps = async (): Promise<{ chatStore: AgentChatStore; protocol: ProtocolDeps }> => {
+    const chatStore = memoryStore();
+    await saveChatDoc(chatStore, baseDoc({ chat_id: 'free:origin', origin_surface: 'agents' }));
+    return {
+      chatStore,
+      protocol: {
+        chatStore,
+        toolContext: {} as unknown as ToolContext,
+        nowIso: () => '2026-09-16T00:00:00.000Z',
+      },
+    };
+  };
+
+  it('stamps the request, run and selection onto the run it mints', async () => {
+    const { chatStore, protocol } = await originDeps();
+    await startRun(
+      protocol,
+      (await loadChatDoc(chatStore, 'free:origin'))!,
+      'Where are we?',
+      { id: 'u1', email: 'editor@example.com' },
+      profile,
+      {},
+      false,
+      undefined,
+      false,
+      'generated',
+      false,
+      {
+        request_id: 'req_article_topic_20260916_01',
+        run_id: 'run_42',
+        selection: { object_type: 'page', object_id: 'page_home' },
+      }
+    );
+    const run = (await loadChatDoc(chatStore, 'free:origin'))!.run!;
+    assert.equal(run.origin_request_id, 'req_article_topic_20260916_01');
+    assert.equal(run.origin_run_id, 'run_42');
+    assert.deepEqual(run.origin_selection, { object_type: 'page', object_id: 'page_home' });
+    // The run's OWN id is a different fact and keeps its own field — this is
+    // why the stored names are `origin_*` and not `run_id`/`request_id`.
+    assert.notEqual(run.run_id, run.origin_run_id);
+  });
+
+  it('writes no origin keys at all when the send knows nothing — a pre-CHAT-ORIGIN run doc', async () => {
+    const { chatStore, protocol } = await originDeps();
+    await startRun(
+      protocol,
+      (await loadChatDoc(chatStore, 'free:origin'))!,
+      'Hello.',
+      { id: 'u1', email: 'editor@example.com' },
+      profile,
+      {}
+    );
+    const run = (await loadChatDoc(chatStore, 'free:origin'))!.run!;
+    assert.equal('origin_request_id' in run, false);
+    assert.equal('origin_run_id' in run, false);
+    assert.equal('origin_selection' in run, false);
+  });
+
+  it('re-derives per send: a second send does not inherit the previous job', async () => {
+    const { chatStore, protocol } = await originDeps();
+    const editor = { id: 'u1', email: 'editor@example.com' };
+    await startRun(
+      protocol,
+      (await loadChatDoc(chatStore, 'free:origin'))!,
+      'One.',
+      editor,
+      profile,
+      {},
+      false,
+      undefined,
+      false,
+      'generated',
+      false,
+      {
+        request_id: 'req_first',
+      }
+    );
+    const first = (await loadChatDoc(chatStore, 'free:origin'))!;
+    first.status = 'idle';
+    await saveChatDoc(chatStore, first);
+    await startRun(protocol, (await loadChatDoc(chatStore, 'free:origin'))!, 'Two.', editor, profile, {});
+    const run = (await loadChatDoc(chatStore, 'free:origin'))!.run!;
+    assert.equal(run.origin_request_id, undefined, 'a run is minted per send; the stale job does not ride along');
+  });
+});

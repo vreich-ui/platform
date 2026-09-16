@@ -89,6 +89,7 @@ import { ARTIFACT_PREVIEW_ROW_THUMBNAIL_WIDTH } from './ArtifactStagePreview';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 import { createFreeChat } from '@core/lib/admin/chat-client';
+import { chatCreateOrigin } from '@core/lib/admin/chat-origin';
 import {
   browserDockedChatStorage,
   clearDockedChatId,
@@ -1293,7 +1294,7 @@ function InventoryBody({ siteId }: { siteId: string }) {
       return cached;
     }
     try {
-      const { chat: created } = await createFreeChat(getToken, 'Inventory');
+      const { chat: created } = await createFreeChat(getToken, 'Inventory', chatCreateOrigin());
       writeDockedChatId(chatStorage, chatStorageKey, created.chat_id);
       setChatId(created.chat_id);
       return created.chat_id;
