@@ -137,6 +137,43 @@ const readJsonResponse = (event: LambdaEvent, body: Record<string, unknown>) => 
   };
 };
 
+/**
+ * CHAT-ORIGIN — where the conversation was opened, from the browser.
+ *
+ * A HINT, never an authority: nothing downstream reads it for rights. But it
+ * is browser-supplied text that ends up inside the model's turn context
+ * (`context.origin`, which Client Manager renders as prose), so it is held to
+ * a SHAPE, not just a length — a slug for the surface and starter, id
+ * characters for the ids. Free text has no business in a field whose whole
+ * purpose is to name a route and an id.
+ *
+ * The client mints both halves from fixed data (`lib/admin/chat-origin.ts`'s
+ * route map and `AgentStarter.key`), so a value that fails these is a forged
+ * or corrupted request, not a legitimate editor.
+ */
+const ORIGIN_SLUG = /^[a-z0-9-]{1,64}$/;
+const ORIGIN_ID = /^[A-Za-z0-9_.:-]{1,256}$/;
+
+const createOriginSchema = z.object({
+  surface: z.string().regex(ORIGIN_SLUG),
+  starter: z.string().regex(ORIGIN_SLUG).optional(),
+});
+
+/**
+ * Each field DROPS rather than rejects (`.catch(undefined)`): a malformed hint
+ * should cost the hint, never the editor's message. `create_chat` above is the
+ * opposite — it is idempotent and free to retry, so a forged value there is
+ * simply refused.
+ */
+const sendOriginSchema = z.object({
+  request_id: z.string().regex(ORIGIN_ID).optional().catch(undefined),
+  run_id: z.string().regex(ORIGIN_ID).optional().catch(undefined),
+  selection: z
+    .object({ object_type: z.string().regex(ORIGIN_ID), object_id: z.string().regex(ORIGIN_ID) })
+    .optional()
+    .catch(undefined),
+});
+
 const requestSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('create_chat'),
@@ -144,6 +181,7 @@ const requestSchema = z.discriminatedUnion('action', [
     object_type: objectTypeSchema.optional(),
     object_id: z.string().min(1).optional(),
     title: z.string().min(1).max(200).optional(),
+    origin: createOriginSchema.optional(),
   }),
   z.object({ action: z.literal('list_chats'), include_all: z.boolean().optional() }),
   z.object({
@@ -172,6 +210,8 @@ const requestSchema = z.discriminatedUnion('action', [
      * nothing. Never trust this value on its own.
      */
     test_mode: z.boolean().optional(),
+    /** CHAT-ORIGIN, per-send half — see `sendOriginSchema`. */
+    origin: sendOriginSchema.optional(),
   }),
   z.object({
     action: z.literal('approve_tool'),
@@ -387,6 +427,17 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
     switch (request.data.action) {
       case 'create_chat': {
+        // CHAT-ORIGIN: stamped ONCE, here. The object branch below returns the
+        // existing doc untouched when there is one, which is what makes this
+        // immutable in practice as well as in principle — `create_chat` for an
+        // object is idempotent (the id derives from the object), so the second
+        // surface to open the same conversation does not rewrite where it began.
+        const originFields = request.data.origin
+          ? {
+              origin_surface: request.data.origin.surface,
+              ...(request.data.origin.starter ? { origin_starter: request.data.origin.starter } : {}),
+            }
+          : {};
         if (request.data.kind === 'object') {
           if (!request.data.object_type || !request.data.object_id) {
             return jsonResponse(400, { error: 'object chats need object_type and object_id.' });
@@ -405,6 +456,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             object_type: request.data.object_type,
             object_id: request.data.object_id,
             title: request.data.title ?? request.data.object_id,
+            ...originFields,
             created_by: caller.email,
             created_at: nowIso(),
             updated_at: nowIso(),
@@ -421,6 +473,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           chat_id: mintFreeChatId(),
           kind: 'free',
           title: request.data.title ?? 'New conversation',
+          ...originFields,
           created_by: caller.email,
           created_at: nowIso(),
           updated_at: nowIso(),
@@ -581,6 +634,32 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         ).catch(() => undefined);
         const requestFocus = boundRow ? composeRequestFocus(boundRow, request.data.focus) : undefined;
 
+        /**
+         * CHAT-ORIGIN (per-send half), reconciled HERE because this is the one
+         * place that holds both halves:
+         *
+         *  - `request_id` prefers `boundRow` — the binding this function just
+         *    resolved from the editorial-request index — over the browser's
+         *    claim, which is only a fallback for the window before the sweeper
+         *    has written the index row. Same fact, better source.
+         *  - `run_id` comes from the browser: the workflow run is resolved
+         *    client-side by the run card (`RequestActivity`), and the index row
+         *    does not carry it. A hint about what the editor is looking at,
+         *    nothing more.
+         *  - `selection` is dropped for an object chat: that pair already
+         *    travels as `context.object_type`/`object_id` (engine.ts constraint
+         *    7), and repeating it as a selection would read as a NEW pick.
+         */
+        const sendOrigin = {
+          ...((boundRow?.request_id ?? request.data.origin?.request_id)
+            ? { request_id: boundRow?.request_id ?? request.data.origin!.request_id! }
+            : {}),
+          ...(request.data.origin?.run_id ? { run_id: request.data.origin.run_id } : {}),
+          ...(request.data.origin?.selection && doc.kind === 'free'
+            ? { selection: request.data.origin.selection }
+            : {}),
+        };
+
         const governanceStore = await getGovernanceBlobStore(event, binding);
         const policies = await resolveActivePolicies(governanceStore);
         const { learning_mode } = policies;
@@ -670,7 +749,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           requestFocus ?? request.data.focus,
           roles.includes('owner'),
           registryKind,
-          testMode
+          testMode,
+          // CHAT-ORIGIN: omitted entirely when nothing is known, so the run doc
+          // is byte-identical to a pre-CHAT-ORIGIN one.
+          Object.keys(sendOrigin).length > 0 ? sendOrigin : undefined
         );
         if (result.resume) await triggerBackground(request.data.chat_id, result.resume.triggerToken);
         return jsonResponse(result.status, result.body);

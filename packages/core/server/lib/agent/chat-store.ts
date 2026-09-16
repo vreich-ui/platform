@@ -196,6 +196,32 @@ export const chatRunSchema = z.object({
    *  above — so pre-existing run docs parse unchanged and an ordinary run
    *  carries no key at all. Every read site tests `=== true`. */
   test_mode: z.boolean().optional(),
+  /**
+   * CHAT-ORIGIN (per-send half). What THIS run is about, stamped at send time
+   * and frozen for the run exactly like autonomy/profile/registry — a run is
+   * minted per send, so a value here is per-send by construction, and a later
+   * send re-derives it rather than inheriting a stale job.
+   *
+   * NAMED `origin_*`, not `request_id`/`run_id`: `run_id` above is THIS CHAT
+   * RUN's own id, and two different `run_id`s on one object is how a reader
+   * ends up debugging the wrong run. The wire field names (`context.origin.
+   * request_id` / `.run_id`, CMS-Agent's `conversationContract.ts`) are
+   * unchanged — `engine.ts` maps these onto them.
+   *
+   * `origin_request_id` is server-resolved where possible (the editorial
+   * request bound to this chat); the browser's value is a fallback hint, and
+   * neither is authority for anything — every verb re-derives rights.
+   */
+  origin_request_id: z.string().max(256).optional(),
+  /** The WORKFLOW run the conversation is about (`request.workflow.run_id`), not this chat run. */
+  origin_run_id: z.string().max(256).optional(),
+  /**
+   * The ASV2 dock's selection, when the chat is NOT already object-bound. An
+   * object chat sends the pair as `context.object_type`/`object_id` already
+   * (engine.ts constraint 7); repeating it as a "selection" would tell Client
+   * Manager the editor had picked something new when they had not.
+   */
+  origin_selection: z.object({ object_type: z.string().max(128), object_id: z.string().max(256) }).optional(),
   trigger_token: z.string().optional(),
   transcript: z.array(chatMsgSchema),
   call_queue: z.array(chatToolCallSchema),
@@ -255,6 +281,21 @@ export const chatDocSchema = z.object({
   created_by: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
+  /**
+   * CHAT-ORIGIN (creation half). WHERE this conversation was opened — the
+   * route-derived surface slug (`lib/admin/chat-origin.ts`) and, when a hub
+   * starter seeded it, that starter's key.
+   *
+   * SET ONCE, AT `create_chat`, AND IMMUTABLE. A chat is opened from one
+   * place; a later send from another tab does not rewrite where it began, and
+   * an object chat's id is derived from the object (so `create_chat` is
+   * idempotent and the SECOND caller's surface is simply not the origin).
+   *
+   * Schema-additive and optional: every chat doc written before this deploy
+   * parses unchanged and sends no `origin.surface` (see `engine.ts`).
+   */
+  origin_surface: z.string().max(64).optional(),
+  origin_starter: z.string().max(64).optional(),
   status: z.enum([
     'idle',
     'queued',

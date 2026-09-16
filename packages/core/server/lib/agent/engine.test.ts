@@ -15,7 +15,9 @@ import test from 'node:test';
 import type { ChatDoc, ChatMsg, ChatRun } from './chat-store.js';
 import {
   checkConverseBounds,
+  dropOverBoundsOrigin,
   dropOverBoundsUiCapabilities,
+  ORIGIN_BOUNDS,
   UI_CAPABILITIES_BOUNDS,
   type CmsAgentConverseRequest,
   type CmsAgentConverseResponse,
@@ -24,11 +26,14 @@ import {
 } from './cms-agent-client.js';
 import {
   buildChatEngine,
+  buildTurnOrigin,
   cmsAgentEngine,
   CmsAgentEngineError,
   CMS_AGENT_UNAVAILABLE_TEXT,
   humanCopyForCmsAgentError,
+  MIN_AGENT_REV_FOR_ORIGIN,
   MIN_AGENT_REV_FOR_UI_CAPABILITIES,
+  originAllowedAtRev,
   providerEngine,
   trimTranscriptForCmsAgent,
   uiCapabilitiesAllowedAtRev,
@@ -357,6 +362,174 @@ test('an over-bounds manifest is dropped whole, never truncated — the turn sti
   assert.equal(checkConverseBounds(dropped), undefined, 'and the turn is still valid');
   // The original is untouched: the drop is a rebuild, not a mutation.
   assert.equal(request.context.ui_capabilities.actions.length, UI_CAPABILITIES_BOUNDS.maxActions + 1);
+});
+
+// ─── CHAT-ORIGIN: context.origin (client_manager rev 9) ─────────────────────
+
+const ORIGIN_REV = MIN_AGENT_REV_FOR_ORIGIN;
+
+/** A chat opened from the hub's "New article" starter, about a registered request. */
+const originDoc = (over: Partial<ChatDoc> = {}): ChatDoc =>
+  chatDoc({ origin_surface: 'agents', origin_starter: 'article', ...over });
+
+test('the origin gate opens at the rev client_manager accepts the field, and only there', () => {
+  assert.equal(MIN_AGENT_REV_FOR_ORIGIN, 9, 'client_manager accepts context.origin from rev 9');
+  assert.ok(
+    MIN_AGENT_REV_FOR_ORIGIN > MIN_AGENT_REV_FOR_UI_CAPABILITIES,
+    'origin is the LATER field — a deployment that takes the manifest may still reject origin'
+  );
+  assert.equal(originAllowedAtRev(MIN_AGENT_REV_FOR_ORIGIN - 1), false);
+  assert.equal(originAllowedAtRev(MIN_AGENT_REV_FOR_ORIGIN), true);
+  assert.equal(originAllowedAtRev(MIN_AGENT_REV_FOR_ORIGIN + 4), true);
+  // An unknown rev reads as below the gate — the closed side is the safe side.
+  assert.equal(originAllowedAtRev(undefined), false);
+  assert.equal(originAllowedAtRev('9'), false);
+  assert.equal(originAllowedAtRev(Number.NaN), false);
+});
+
+test('a rev-9 workspace carries context.origin: surface + starter from the doc, request/run from the run', async () => {
+  const { engine, converseCalls } = engineWith([okTurn()], { revs: [ORIGIN_REV] });
+  await engine({
+    doc: originDoc(),
+    run: chatRun({ origin_request_id: 'req_article_topic_20260916_01', origin_run_id: 'run_42' }),
+    system: '',
+    tools: TOOLS,
+  });
+
+  assert.deepEqual(converseCalls[0]!.context.origin, {
+    surface: 'agents',
+    starter: 'article',
+    request_id: 'req_article_topic_20260916_01',
+    run_id: 'run_42',
+  });
+  assert.equal(checkConverseBounds(converseCalls[0]!), undefined, 'the origin must pass the pre-flight bounds');
+});
+
+test('below the origin gate the field is absent and the context is byte-identical to the pre-CHAT-ORIGIN wire', async () => {
+  const gated = engineWith([okTurn()], { revs: [ORIGIN_REV - 1], roles: ['owner'] });
+  await gated.engine({ doc: originDoc(), run: chatRun({ origin_request_id: 'req_1' }), system: '', tools: TOOLS });
+  const oldWire = gated.converseCalls[0]!.context;
+  assert.equal('origin' in oldWire, false, 'a tenant on an older agent rev degrades, never fails');
+  // The manifest still rides at rev 8 — the two gates are independent.
+  assert.ok(oldWire.ui_capabilities, 'rev 8 still carries ui_capabilities');
+
+  const open = engineWith([okTurn()], { revs: [ORIGIN_REV], roles: ['owner'] });
+  await open.engine({ doc: originDoc(), run: chatRun({ origin_request_id: 'req_1' }), system: '', tools: TOOLS });
+  const { origin: _added, ...withoutOrigin } = open.converseCalls[0]!.context;
+  assert.equal(JSON.stringify(oldWire), JSON.stringify(withoutOrigin));
+});
+
+test('a chat that knows nothing about where it came from sends no origin at all', async () => {
+  const { engine, converseCalls } = engineWith([okTurn()], { revs: [ORIGIN_REV] });
+  await engine({ doc: chatDoc(), run: chatRun(), system: '', tools: TOOLS });
+  assert.equal('origin' in converseCalls[0]!.context, false, 'absent, not an empty object');
+});
+
+test('buildTurnOrigin: the surface is required, so a pre-CHAT-ORIGIN doc with a resolved request falls back to admin', () => {
+  // Nothing at all — no doc fields, no run fields.
+  assert.equal(buildTurnOrigin(chatDoc(), chatRun()), undefined);
+  // A chat doc minted before this change whose next send resolved a binding:
+  // the request id is worth more than the unknown surface costs.
+  assert.deepEqual(buildTurnOrigin(chatDoc(), chatRun({ origin_request_id: 'req_1' })), {
+    surface: 'admin',
+    request_id: 'req_1',
+  });
+  assert.deepEqual(buildTurnOrigin(originDoc(), chatRun()), { surface: 'agents', starter: 'article' });
+});
+
+test('buildTurnOrigin: an object chat never sends a selection — its pair already rides object_type/object_id', () => {
+  const selection = { object_type: 'page', object_id: 'page_home' };
+  const objectChat = buildTurnOrigin(
+    originDoc({ origin_surface: 'objects' }),
+    chatRun({ origin_selection: selection })
+  );
+  assert.equal(objectChat?.selection, undefined, 'the same fact twice would read as a NEW pick');
+
+  const free = chatDoc({ chat_id: 'chat_free1', kind: 'free', origin_surface: 'objects' });
+  delete free.object_type;
+  delete free.object_id;
+  assert.deepEqual(buildTurnOrigin(free, chatRun({ origin_selection: selection })), {
+    surface: 'objects',
+    selection,
+  });
+});
+
+test('a deployment that rejects origin despite a passing rev drops BOTH gated fields in ONE retry', async () => {
+  const rejected: CmsAgentResult<CmsAgentConverseResponse> = {
+    ok: false,
+    code: 'invalid_turn_request',
+    message: 'context: Unrecognized key "origin"',
+    retryableWithSameTurnId: false,
+  };
+  const { engine, converseCalls } = engineWith([rejected, okTurn()], { revs: [ORIGIN_REV], roles: ['owner'] });
+  const turn = await engine({
+    doc: originDoc(),
+    run: chatRun({ origin_request_id: 'req_1' }),
+    system: '',
+    tools: TOOLS,
+  });
+
+  assert.equal(converseCalls.length, 2, 'ONE retry — a second would burn another turn_id to learn the same thing');
+  assert.ok(converseCalls[0]!.context.origin, 'the rev said it was safe to send');
+  assert.ok(converseCalls[0]!.context.ui_capabilities);
+  assert.equal('origin' in converseCalls[1]!.context, false, 'the retry drops origin');
+  assert.equal('ui_capabilities' in converseCalls[1]!.context, false, 'and the manifest, in the same retry');
+  assert.equal(converseCalls[0]!.turn_id, 't_run_pf2_1');
+  assert.equal(converseCalls[1]!.turn_id, 't_run_pf2_1_nouc', 'a fresh id — the first claim is already written');
+  assert.equal(turn.text, 'Here is a proposal.', 'the editor still gets an answer');
+  assert.equal(converseCalls[1]!.context.approval_note, converseCalls[0]!.context.approval_note);
+});
+
+test('a re-resolve after the gated fields were rejected never puts them back', async () => {
+  const rejected: CmsAgentResult<CmsAgentConverseResponse> = {
+    ok: false,
+    code: 'invalid_turn_request',
+    message: 'context: Unrecognized key "origin"',
+    retryableWithSameTurnId: false,
+  };
+  const stale: CmsAgentResult<CmsAgentConverseResponse> = {
+    ok: false,
+    code: 'agent_unresolved',
+    message: 'stale ref',
+    retryableWithSameTurnId: false,
+  };
+  const { engine, converseCalls } = engineWith([rejected, stale, okTurn()], {
+    revs: [ORIGIN_REV, ORIGIN_REV, ORIGIN_REV + 1],
+    roles: ['owner'],
+  });
+  await engine({ doc: originDoc(), run: chatRun({ origin_request_id: 'req_1' }), system: '', tools: TOOLS });
+
+  assert.equal(converseCalls.length, 3);
+  assert.equal('origin' in converseCalls[2]!.context, false, 'the drop is one-way for the life of the run');
+  assert.equal('ui_capabilities' in converseCalls[2]!.context, false);
+});
+
+test('an over-bounds origin is dropped whole — the turn still goes, under the same turn_id', () => {
+  const request = {
+    agent_ref: 'agt_client_manager@9',
+    project_id: 'platform',
+    conversation_id: 'obj:page_home',
+    turn_id: 't_run_pf2_1',
+    actor: { kind: 'human', id: 'identity-wolf' },
+    context: {
+      site_id: 'site_platform',
+      approval_note: 'note',
+      origin: { surface: 'agents', request_id: 'r'.repeat(ORIGIN_BOUNDS.maxChars) },
+    },
+    messages: [{ role: 'user' as const, text: 'hi' }],
+    tools: [],
+    constraints: { max_tokens: 16_000, timeout_ms: 90_000 },
+  } satisfies CmsAgentConverseRequest;
+
+  const dropped = dropOverBoundsOrigin(request);
+  assert.equal('origin' in dropped.context, false, 'dropped, not truncated');
+  assert.equal(dropped.turn_id, request.turn_id, 'nothing is burned');
+  assert.equal(checkConverseBounds(dropped), undefined);
+  // The original is untouched: the drop is a rebuild, not a mutation.
+  assert.ok(request.context.origin.request_id.length > ORIGIN_BOUNDS.maxChars - 1);
+  // An ordinary origin passes straight through, same object.
+  const ordinary = { ...request, context: { ...request.context, origin: { surface: 'agents' } } };
+  assert.equal(dropOverBoundsOrigin(ordinary), ordinary);
 });
 
 test('a free chat sends neither object_type nor object_id; diagnostics_requested rides only when set', async () => {

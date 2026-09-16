@@ -908,7 +908,20 @@ export const startRun = async (
    * every later hop reads the value the turn was authorised with, not whatever
    * the browser is sending now. Defaults false for existing callers and tests.
    */
-  testMode = false
+  testMode = false,
+  /**
+   * CHAT-ORIGIN (per-send half) — what THIS run is about, already reconciled
+   * by the `send` handler: the request id it resolved itself where it could,
+   * the workflow run the browser named, and the dock selection (free chats
+   * only — an object chat sends its pair as `context.object_type`/`object_id`).
+   * Frozen into the run like autonomy/profile, so every later hop of the run
+   * sends the same origin the send was stamped with.
+   */
+  origin?: {
+    request_id?: string;
+    run_id?: string;
+    selection?: { object_type: string; object_id: string };
+  }
 ): Promise<ProtocolResult> => {
   const at = () => (deps.nowIso ?? (() => new Date().toISOString()))();
   const nowMs = (deps.nowMs ?? Date.now)();
@@ -950,6 +963,11 @@ export const startRun = async (
     learning_mode: learningMode,
     // Written only when true: an ordinary run's doc is byte-identical to before.
     ...(testMode ? { test_mode: true } : {}),
+    // Each key written only when known, so a run that knows nothing about a
+    // job is byte-identical to a pre-CHAT-ORIGIN run doc.
+    ...(origin?.request_id ? { origin_request_id: origin.request_id } : {}),
+    ...(origin?.run_id ? { origin_run_id: origin.run_id } : {}),
+    ...(origin?.selection ? { origin_selection: origin.selection } : {}),
     ...(focus ? { focus } : {}),
     diagnostics_requested: editorIsOwner && asksForDiagnostics(text),
     engine: 'provider',
