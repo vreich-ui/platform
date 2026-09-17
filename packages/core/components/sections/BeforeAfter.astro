@@ -1,0 +1,66 @@
+---
+/**
+ * `before_after` — a deliberately fixed two-image comparison. It renders
+ * side-by-side from the small breakpoint upward and stacks on narrow screens.
+ * Labels stay visible on the images; caption + one CTA are optional.
+ */
+import type {
+  BeforeAfterResolved,
+  RenderCtx,
+  SectionDataOf,
+} from '@core/lib/registry/components/types';
+
+type Props = {
+  data: SectionDataOf<'before_after'>;
+  resolved: BeforeAfterResolved;
+  ctx: RenderCtx;
+};
+
+const { data, resolved } = Astro.props;
+const images = [data.before, data.after] as const;
+const actionClass = (style?: 'primary' | 'secondary' | 'link') =>
+  style === 'secondary' ? 'btn-secondary' : style === 'link' ? 'btn-link' : 'btn-primary';
+const hasHeader = Boolean(data.kicker || data.heading);
+---
+
+<section id={data.anchor} class="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+  {
+    hasHeader && (
+      <div class="mx-auto max-w-3xl text-center">
+        {data.kicker && <p class="text-sm font-semibold uppercase tracking-[0.18em] text-accent">{data.kicker}</p>}
+        {data.heading && <h2 class="mt-3 text-3xl font-bold tracking-tight text-heading sm:text-4xl">{data.heading}</h2>}
+      </div>
+    )
+  }
+
+  <div class:list={['grid gap-4 sm:grid-cols-2', hasHeader ? 'mt-9' : '']}>
+    {
+      images.map((image, index) => (
+        <figure class="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="relative">
+            <img
+              class="aspect-[4/5] w-full object-cover"
+              src={image.src}
+              alt={image.alt}
+              loading={index === 0 ? 'eager' : 'lazy'}
+              decoding="async"
+            />
+            <span class="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-heading shadow-sm backdrop-blur dark:bg-slate-950/85">
+              {image.label}
+            </span>
+          </div>
+        </figure>
+      ))
+    }
+  </div>
+
+  {data.caption && <p class="mx-auto mt-5 max-w-3xl text-center text-sm leading-6 text-muted">{data.caption}</p>}
+
+  {
+    data.action && resolved.actionHref && (
+      <div class="mt-7 flex justify-center">
+        <a class:list={[actionClass(data.action.style)]} href={resolved.actionHref} set:text={data.action.label} />
+      </div>
+    )
+  }
+</section>
