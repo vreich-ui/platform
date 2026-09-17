@@ -1,9 +1,9 @@
 {
   "__generated": {
-    "at": "2026-09-17T15:25:27.892Z",
+    "at": "2026-09-17T16:25:25.982Z",
     "attribution": "oauth",
     "from": "objects/content_item/by-id/req_agent_bemotrizinol_us_sunscreen_filter_20260917_01.json",
-    "record_version": 8,
+    "record_version": 14,
     "surface": "plugin:openai-agent"
   },
   "deck": "The FDA added bemotrizinol to the U.S. sunscreen monograph in 2026. It is a photostable UVA-and-UVB filter, but it does not make the sunscreen already in your bathroom obsolete.",
@@ -13,8 +13,8 @@
     "writer_notes": "Editor-selected topic after current web research and 30-day site analytics review. Primary intent: explain what the 2026 U.S. bemotrizinol change means without implying that one filter makes a finished sunscreen superior. Planned media: one public-domain scientific structure image plus two governed generated sunbathing images. Publish dark only; no production release without a separate instruction."
   },
   "image": {
-    "alt": "Adult applying sunscreen while relaxing in the sun.",
-    "src": "/img/req_agent_bemotrizinol_us_sunscreen_filter_20260917_01/f62af132e19c195b49571f2e4bb47edde3a638dc5a1032d2928b7ad2183b19fe.webp"
+    "alt": "Adult applying sunscreen to one shoulder at the beach.",
+    "src": "/img/req_agent_bemotrizinol_us_sunscreen_filter_20260917_01/29813488d14acb9cb0acb1fc186b9348ab8d50d541f221a0230d57ea5019a52f.webp"
   },
   "nodes": [
     {
