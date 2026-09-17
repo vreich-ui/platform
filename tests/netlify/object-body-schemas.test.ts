@@ -424,6 +424,7 @@ test('sections: every union member parses from a seed fixture', () => {
   assert.equal(SECTION_SCHEMA_VERSION, 'section.v1');
   // The union covers exactly the documented types.
   assert.deepEqual([...sectionTypes].sort(), [
+    'before_after',
     'bio',
     'brand_row',
     'card',
