@@ -80,6 +80,13 @@ export const repoRoot = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)
 export const CANONICAL_INFRA_REDIRECTS = [
   { from: '/pdf/*', to: '/.netlify/functions/get-public-pdf?blobKey=pdf/:splat', status: 200, force: true },
   { from: '/img/*', to: '/.netlify/functions/get-public-image?blobKey=image/:splat', status: 200, force: true },
+  // packages/core/server/functions/artifact-upload.ts declares
+  // `export const config = { path: '/api/artifacts/upload' }`, but every site file only reaches
+  // it through `export * from '<core>'` -- a re-exported `config` is not statically resolvable,
+  // so Netlify never registers the path on any deployed tenant (verified fleet-wide 404 on
+  // 2026-09-17, while /.netlify/functions/artifact-upload itself answered 401/415, proving the
+  // function IS deployed). Hand-written, same as pdf/img above.
+  { from: '/api/artifacts/upload', to: '/.netlify/functions/artifact-upload', status: 200, force: true },
   { from: '/mcp', to: '/.netlify/functions/mcp', status: 200, force: true },
   {
     from: '/.well-known/oauth-protected-resource',
@@ -599,7 +606,7 @@ export const computeAdminParity = (target) => {
   }
   add(
     'infra-redirects',
-    `netlify.toml carries all ${CANONICAL_INFRA_REDIRECTS.length} canonical infra redirects (pdf/img, /mcp, OAuth AS ×9, /api/t, admin rewrite)`,
+    `netlify.toml carries all ${CANONICAL_INFRA_REDIRECTS.length} canonical infra redirects (pdf/img, artifact-upload, /mcp, OAuth AS ×9, /api/t, admin rewrite)`,
     'scaffold (create-site) | migrate-site --admin-parity',
     redirectProblems.length ? 'GAP' : 'PASS',
     redirectProblems.length ? redirectProblems.join('; ') : 'all canonical rules present and exact'

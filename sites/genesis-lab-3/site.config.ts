@@ -45,6 +45,11 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
   redirects: [
     { from: '/pdf/*', to: '/.netlify/functions/get-public-pdf?blobKey=pdf/:splat', status: 200 },
     { from: '/img/*', to: '/.netlify/functions/get-public-image?blobKey=image/:splat', status: 200 },
+    // A re-exported `config` (every site's artifact-upload.ts is `export * from '<core>'`) is
+    // not statically resolvable, so Netlify never registers the path the core function
+    // declares -- redirect it by hand, same as /img/* and /pdf/* above (fleet-wide 404 verified
+    // 2026-09-17).
+    { from: '/api/artifacts/upload', to: '/.netlify/functions/artifact-upload', status: 200 },
     { from: '/mcp', to: '/.netlify/functions/mcp', status: 200 },
     { from: '/.well-known/oauth-protected-resource', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata', status: 200 },
     { from: '/.well-known/oauth-protected-resource/*', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata', status: 200 },
