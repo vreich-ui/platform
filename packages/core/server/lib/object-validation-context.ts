@@ -17,8 +17,13 @@
  * `isRouteTaken` excludes the object under validation (`selfObjectId`) so a page
  * re-saving its own route is not a false conflict.
  */
-import { readArtifactReferenceResult, type ArtifactIndexStore } from './artifact-index.js';
-import { MAJOR_KEY_ARTIFACT_REF_RE, PUBLIC_ARTIFACT_PATH_RE, rawArtifactRefForPublicPath } from './artifact-trust.js';
+import type { ArtifactIndexStore } from './artifact-index.js';
+import {
+  MAJOR_KEY_ARTIFACT_REF_RE,
+  PUBLIC_ARTIFACT_PATH_RE,
+  rawArtifactRefForPublicPath,
+  readArtifactTrustIdentityResult,
+} from './artifact-trust.js';
 import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY, type BlobListItem } from './blob-list.js';
 import { isBlobCredentialsConfigured } from './blob-store.js';
 import { loadContentItemIds } from './content-item-index.js';
@@ -149,7 +154,7 @@ const preloadArtifactRefResolutions = async (
         return;
       }
       try {
-        const read = await readArtifactReferenceResult(indexStore, requestId, sha256);
+        const read = await readArtifactTrustIdentityResult(indexStore, requestId, sha256);
         if (read.status === 'rejected') {
           // The entry EXISTS and platform refused it. That is knowable regardless of
           // read consistency, and it is never fixed by re-uploading — so report it as
