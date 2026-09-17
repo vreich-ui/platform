@@ -1,0 +1,32 @@
+name: Apply chat publishing contract patch
+
+on:
+  push:
+    branches:
+      - codex/chat-publish-contract
+    paths:
+      - .github/workflows/apply-chat-publish-contract.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/chat-publish-contract
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply exact contract edits
+        run: node scripts/apply-chat-publish-contract.mjs
+      - name: Commit generated edits
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/core/server/lib/mcp-tool-definitions-2.ts packages/core/lib/registry/object-contract.ts tests/netlify/chat-publishing-contract.test.ts
+          git diff --cached --check
+          git commit -m "fix: clarify direct MCP article publishing path"
+          git push origin HEAD:codex/chat-publish-contract
