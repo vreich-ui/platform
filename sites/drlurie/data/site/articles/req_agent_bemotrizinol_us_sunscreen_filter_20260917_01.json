@@ -1,9 +1,9 @@
 {
   "__generated": {
-    "at": "2026-09-17T12:56:09.877Z",
+    "at": "2026-09-17T15:25:27.892Z",
     "attribution": "oauth",
     "from": "objects/content_item/by-id/req_agent_bemotrizinol_us_sunscreen_filter_20260917_01.json",
-    "record_version": 4,
+    "record_version": 8,
     "surface": "plugin:openai-agent"
   },
   "deck": "The FDA added bemotrizinol to the U.S. sunscreen monograph in 2026. It is a photostable UVA-and-UVB filter, but it does not make the sunscreen already in your bathroom obsolete.",
@@ -29,6 +29,12 @@
       "kind": "content",
       "public": {
         "body": "Bemotrizinol, often shortened to BEMT, is an organic UV filter. Its longer ingredient name is bis-ethylhexyloxyphenol methoxyphenyl triazine. It absorbs both UVB and UVA radiation and is notably photostable, meaning the molecule itself holds up well under UV exposure.\n\nThat matters in formulation. The FDA’s scientific review found literature showing that bemotrizinol can improve the photostability of other filters, including avobenzone and octinoxate. The agency also found no new safety or efficacy concern from combining bemotrizinol with other sunscreen actives permitted under the monograph.\n\nIt is new to the U.S. monograph, not new to sunscreen science. Bemotrizinol has been used in sunscreens in Europe and other markets for years.",
+        "media": {
+          "alt": "Two-dimensional structural formula of bemotrizinol.",
+          "caption": "Structural formula of bemotrizinol. Public-domain source: Wikimedia Commons.",
+          "src": "/img/req_agent_bemotrizinol_us_sunscreen_filter_20260917_01/1a303ecf3c59858157fc01919f6c8b80424625cbff316f07e179465038540630.webp",
+          "type": "image"
+        },
         "title": "What bemotrizinol is"
       }
     },
