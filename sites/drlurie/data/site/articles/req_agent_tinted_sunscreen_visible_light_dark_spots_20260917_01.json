@@ -1,0 +1,166 @@
+{
+  "__generated": {
+    "at": "2026-09-17T16:26:19.662Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_agent_tinted_sunscreen_visible_light_dark_spots_20260917_01.json",
+    "record_version": 10,
+    "surface": "plugin:openai-agent"
+  },
+  "deck": "Broad-spectrum sunscreen still does the essential UV work. If you are prone to melasma or stubborn dark marks, a well-matched tint can add something ordinary sunscreen may not: meaningful protection from visible light.",
+  "description": "What tinted sunscreen adds for melasma and hyperpigmentation, how iron oxides work, and how to choose a formula without mistaking tint for better SPF.",
+  "editorial": {
+    "framework": "fw_concern",
+    "writer_notes": "Topic selected after 30-day analytics review and current inventory review. Media production ledger (private): hero generation fal-ai/flux-2/klein/9b estimated $0.009438, completed 2026-09-17T15:39:04.895Z. First swatch generation estimated $0.006294, completed 15:39:35.275Z, rejected after OCR detected stray text fragments. Replacement swatch generation estimated $0.006294, completed 15:40:36.705Z. Final annotation was deterministic (no model) and completed 15:41:38.537Z. Visible-spectrum source imported under CC BY-SA 4.0 at 15:43:06.345Z and re-encoded deterministically (no model) at 15:43:21.867Z. Model-generation estimate incurred for this article: $0.022026 including the rejected swatch attempt. The app exposes completion timestamps but no per-job generation start time or elapsed duration; do not infer a seconds-taken metric."
+  },
+  "image": {
+    "alt": "Adult with medium-deep skin applying tinted sunscreen to the cheek.",
+    "src": "/img/req_agent_tinted_sunscreen_visible_light_dark_spots_20260917_01/bc5b145e0374f7f6c8f2716c26f8169b6b8e7ca0098fc7d65de089bbe807b55e.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_q7m2",
+      "kind": "content",
+      "public": {
+        "body": "If you are trying to prevent melasma or dark marks from getting darker, the word “tinted” on sunscreen can matter for a reason that has nothing to do with makeup.\n\nOrdinary broad-spectrum sunscreen is designed around ultraviolet radiation. That remains essential. But sunlight also contains visible light, and visible light can trigger or worsen pigmentation in some people—particularly people with darker skin tones and people with pigmentary conditions such as melasma.\n\nTinted sunscreens can add pigments, usually iron oxides, that reduce some of that visible-light exposure. The useful question is not whether tinted sunscreen is universally “better.” It is whether visible-light protection matches the problem you are actually trying to solve."
+      }
+    },
+    {
+      "id": "n_v3c8",
+      "kind": "content",
+      "public": {
+        "body": "Visible light sits next to ultraviolet radiation on the electromagnetic spectrum. It is the part of sunlight your eyes can see, roughly 400 to 700 nanometers.\n\nLaboratory and clinical studies show that visible light can produce sustained pigmentation in more melanated skin. That matters most when pigmentation is already a concern: melasma, post-inflammatory hyperpigmentation, or dark marks that seem to return despite consistent UV protection.\n\nThis does not mean visible light is equally important for every person or every skin concern. For prevention of sunburn, skin cancer, and UV-driven photoaging, broad-spectrum UV protection remains the foundation.",
+        "media": {
+          "alt": "Scientific color band showing the wavelengths of the visible-light spectrum.",
+          "caption": "Visible spectrum, approximately 390–710 nm. Adapted only by file re-encoding from Bhutajata via Wikimedia Commons, CC BY-SA 4.0.",
+          "src": "/img/req_agent_tinted_sunscreen_visible_light_dark_spots_20260917_01/0410a27273d9fadf844905a0e735587c198b8883d3aea61818860ff2e461a331.webp",
+          "type": "image"
+        },
+        "title": "What visible light has to do with dark spots"
+      }
+    },
+    {
+      "id": "n_k5p1",
+      "kind": "content",
+      "public": {
+        "body": "The tint usually comes from iron oxides—red, yellow, and black pigments blended to make a skin-toned shade. These pigments can absorb and scatter visible wavelengths that ordinary transparent sunscreen films do not block as well.\n\nThe best evidence is not just laboratory theory. In a randomized melasma trial, a sunscreen that included visible-light protection alongside UV protection improved pigment outcomes more than a UV-only sunscreen when both groups were also using hydroquinone. Other studies in darker skin phototypes have found less visible-light-induced pigmentation with iron-oxide-containing formulas than with untinted mineral sunscreen.\n\nSo the tint is doing two jobs at once: changing the cosmetic color of the product and, when the pigment system is appropriate, extending photoprotection beyond UV.",
+        "media": {
+          "alt": "Four sunscreen swatches with a deterministic label reading Tinted sunscreen plus iron oxides.",
+          "caption": "Conceptual swatch visual generated through the Dr. Lurie image pipeline; text added deterministically after layout analysis.",
+          "src": "/img/req_agent_tinted_sunscreen_visible_light_dark_spots_20260917_01/19f3cdd6d1cb51462a02dbf8b23ff66e616588183b779f5e95af2354c43dd270.webp",
+          "type": "image"
+        },
+        "title": "What the tint actually adds"
+      }
+    },
+    {
+      "id": "n_r8d4",
+      "kind": "content",
+      "public": {
+        "body": "Tinted sunscreen is most worth considering when unwanted pigmentation is one of your main concerns. Dermatologists commonly recommend iron-oxide-containing tinted sunscreen for melasma and for people with darker skin tones who are prone to hyperpigmentation.\n\nThat is different from saying everyone needs a tinted formula. If your main goal is reliable UV protection and you already use a broad-spectrum sunscreen consistently, an untinted product can still be an effective sunscreen.\n\nThe practical advantage matters too. A tint that blends well may avoid the gray or white cast some sunscreens leave on deeper skin tones. A product you are comfortable wearing is easier to use in the amount and frequency that sunscreen requires.",
+        "title": "Who is most likely to benefit"
+      }
+    },
+    {
+      "id": "n_h2w9",
+      "kind": "content",
+      "public": {
+        "body": "Start with the sunscreen basics: broad-spectrum protection, SPF 30 or higher, and water resistance if you need it. Then look for a tint that actually matches your skin well enough to wear generously.\n\nIf visible-light protection is the goal, look for iron oxides in the ingredient list. In the United States they often appear among inactive ingredients because sunscreen “active ingredients” are defined around UV protection, not visible-light protection.\n\nThere is an important limitation: “tinted” is not a standardized measure of visible-light protection. A 2026 analysis of 37 tinted sunscreens found that iron-oxide concentration was rarely disclosed and that visible-light testing claims were inconsistent. The shade, pigment mix, concentration, film formation, and finished formula all matter.\n\nThat means two beige-looking sunscreens are not automatically equivalent just because both are tinted.",
+        "title": "How to shop without overreading the label"
+      }
+    },
+    {
+      "id": "n_t6j3",
+      "kind": "content",
+      "public": {
+        "body": "1. Treating tint as a substitute for SPF. Iron oxides extend protection into visible light; they do not replace broad-spectrum UV protection.\n\n2. Choosing the wrong shade and then applying too little. If the tint looks conspicuous at a useful amount, you are likely to under-apply it.\n\n3. Assuming “mineral” automatically means visible-light protection. Modern zinc-oxide and titanium-dioxide sunscreens can be cosmetically transparent. The pigment system is what adds meaningful visible-light attenuation.\n\n4. Expecting sunscreen alone to erase established melasma or post-inflammatory hyperpigmentation. Photoprotection helps prevent additional darkening and supports treatment, but persistent pigmentation may need a dermatologist-guided plan.",
+        "title": "Four mistakes that make the tint less useful"
+      }
+    },
+    {
+      "id": "n_m4s7",
+      "kind": "content",
+      "public": {
+        "body": "If dark spots or melasma are the problem, a tinted sunscreen with iron oxides is one of the few skincare choices where the color itself can have a biologic reason.\n\nKeep the hierarchy clear. First, choose a broad-spectrum sunscreen you can use consistently. If pigmentation is a priority, add a tint that matches your skin and contains iron oxides. Then judge the finished product by whether you can apply enough of it without fighting the texture, shade, or cast.\n\nA tint is not a promise of stronger SPF. It is a way to broaden photoprotection when visible light is part of the pigmentation problem.",
+        "title": "The bottom line"
+      }
+    },
+    {
+      "id": "n_z1f5",
+      "kind": "content",
+      "public": {
+        "body": "American Academy of Dermatology. How to decode a sunscreen label.\n\nHe M, et al. Visible Light Protection: An Updated Review of Tinted Sunscreens. Photodermatology, Photoimmunology & Photomedicine. 2025.\n\nDoan V, et al. Iron Oxides in Tinted Sunscreen for Hyperpigmentation: A Product Analysis and Literature Review. Journal of Drugs in Dermatology. 2026.\n\nCastanedo-Cazares JP, et al. Near-visible light and UV photoprotection in the treatment of melasma: a double-blind randomized trial. 2014.\n\nDumbuya H, et al. Impact of Iron-Oxide Containing Formulations Against Visible Light-Induced Skin Pigmentation in Skin of Color Individuals. 2020.",
+        "title": "Sources"
+      }
+    },
+    {
+      "id": "n_p8d2",
+      "kind": "action",
+      "public": {
+        "ctaLink": "/pdf/req_agent_tinted_sunscreen_visible_light_dark_spots_20260917_01/6eee294248c4c7325c7f83cc215c65822282aa77821fa953e9703df5ecf28bfe.pdf",
+        "ctaText": "Download the illustrated PDF guide"
+      }
+    }
+  ],
+  "seo": {
+    "meta_description": "Tinted sunscreen can add visible-light protection for melasma and hyperpigmentation. Learn what iron oxides do and what to look for in a formula.",
+    "meta_title": "Tinted Sunscreen for Dark Spots: Iron Oxides & Visible Light"
+  },
+  "slug": "tinted-sunscreen-visible-light-dark-spots",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-17",
+        "name": "How to decode a sunscreen label",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad_label",
+        "url": "https://www.aad.org/public/everyday-care/sun-protection/shade-clothing-sunscreen/understand-sunscreen-labels"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Visible Light Protection: An Updated Review of Tinted Sunscreens",
+        "publisher": "Photodermatology, Photoimmunology & Photomedicine / PubMed",
+        "source_id": "src_review_2025",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/40552645/"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Iron Oxides in Tinted Sunscreen for Hyperpigmentation: A Product Analysis and Literature Review",
+        "publisher": "Journal of Drugs in Dermatology / PubMed",
+        "source_id": "src_product_2026",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/42081626/"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Near-visible light and UV photoprotection in the treatment of melasma: a double-blind randomized trial",
+        "publisher": "Photodermatology, Photoimmunology & Photomedicine / PubMed",
+        "source_id": "src_trial_2014",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/24313385/"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Impact of Iron-Oxide Containing Formulations Against Visible Light-Induced Skin Pigmentation in Skin of Color Individuals",
+        "publisher": "Journal of Drugs in Dermatology / PubMed",
+        "source_id": "src_ironoxide_2020",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/32726103/"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Melasma: Self-care",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad_melasma",
+        "url": "https://www.aad.org/public/diseases/a-z/melasma-self-care"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skincare",
+    "tags": [
+      "sun-protection",
+      "pigmentation",
+      "skin-science",
+      "dermatology",
+      "skincare"
+    ]
+  },
+  "title": "Tinted Sunscreen for Dark Spots: When Visible-Light Protection Matters"
+}
