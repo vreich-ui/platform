@@ -59,7 +59,9 @@ const hasHeader = Boolean(data.kicker || data.heading);
   {
     data.action && resolved.actionHref && (
       <div class="mt-7 flex justify-center">
-        <a class:list={[actionClass(data.action.style)]} href={resolved.actionHref} set:text={data.action.label} />
+        <a class:list={[actionClass(data.action.style)]} href={resolved.actionHref}>
+          {data.action.label}
+        </a>
       </div>
     )
   }
