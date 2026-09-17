@@ -1,0 +1,167 @@
+{
+  "__generated": {
+    "at": "2026-09-17T12:56:09.877Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_agent_bemotrizinol_us_sunscreen_filter_20260917_01.json",
+    "record_version": 4,
+    "surface": "plugin:openai-agent"
+  },
+  "deck": "The FDA added bemotrizinol to the U.S. sunscreen monograph in 2026. It is a photostable UVA-and-UVB filter, but it does not make the sunscreen already in your bathroom obsolete.",
+  "description": "What bemotrizinol is, what the FDA reviewed, and what the 2026 U.S. sunscreen change does—and does not—mean for the sunscreen you use.",
+  "editorial": {
+    "framework": "fw_ingredient",
+    "writer_notes": "Editor-selected topic after current web research and 30-day site analytics review. Primary intent: explain what the 2026 U.S. bemotrizinol change means without implying that one filter makes a finished sunscreen superior. Planned media: one public-domain scientific structure image plus two governed generated sunbathing images. Publish dark only; no production release without a separate instruction."
+  },
+  "image": {
+    "alt": "Adult applying sunscreen while relaxing in the sun.",
+    "src": "/img/req_agent_bemotrizinol_us_sunscreen_filter_20260917_01/f62af132e19c195b49571f2e4bb47edde3a638dc5a1032d2928b7ad2183b19fe.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_a7f2",
+      "kind": "content",
+      "public": {
+        "body": "A new sunscreen filter has entered the U.S. rulebook. That is meaningful. It is not a reason to throw away the sunscreen you already use.\n\nIn June 2026, the FDA added bemotrizinol to the over-the-counter sunscreen monograph, with the order taking effect on August 9. It can be used at concentrations up to 6% when the finished product meets the monograph’s conditions.\n\nThe practical change is simpler than some of the headlines: U.S. formulators now have another broad-spectrum UV filter to work with. Whether that produces a sunscreen you prefer still depends on the whole formula, not one ingredient name."
+      }
+    },
+    {
+      "id": "n_b3c8",
+      "kind": "content",
+      "public": {
+        "body": "Bemotrizinol, often shortened to BEMT, is an organic UV filter. Its longer ingredient name is bis-ethylhexyloxyphenol methoxyphenyl triazine. It absorbs both UVB and UVA radiation and is notably photostable, meaning the molecule itself holds up well under UV exposure.\n\nThat matters in formulation. The FDA’s scientific review found literature showing that bemotrizinol can improve the photostability of other filters, including avobenzone and octinoxate. The agency also found no new safety or efficacy concern from combining bemotrizinol with other sunscreen actives permitted under the monograph.\n\nIt is new to the U.S. monograph, not new to sunscreen science. Bemotrizinol has been used in sunscreens in Europe and other markets for years.",
+        "title": "What bemotrizinol is"
+      }
+    },
+    {
+      "id": "n_c9d4",
+      "kind": "content",
+      "public": {
+        "body": "The FDA did not add bemotrizinol simply because it was already used elsewhere. The agency reviewed a formal monograph-order request from DSM Nutritional Products, along with submitted studies, FDA literature reviews, and public comments.\n\nIn the efficacy package, controlled SPF studies showed that bemotrizinol itself contributed measurable UV protection, with greater concentrations producing greater SPF. The final order concluded that bemotrizinol is generally recognized as safe and effective under the specified monograph conditions, including use up to 6%.\n\nThe useful consumer translation is not that bemotrizinol is a magic SPF booster. It is that formulators have another photostable filter that covers both UVA and UVB and can be combined with other permitted filters to build a finished sunscreen.",
+        "title": "What the evidence shows"
+      }
+    },
+    {
+      "id": "n_d2e7",
+      "kind": "content",
+      "public": {
+        "body": "Systemic absorption is a reasonable question because some sunscreen filters can be measured in blood after heavy use. For bemotrizinol, FDA concluded that overall absorption through human skin was low, even with repeat application under maximum-use study conditions.\n\nThe pivotal program included a maximum-use study in 162 healthy adults. A published earlier pilot study also found that plasma concentrations only rarely exceeded the FDA testing threshold used to decide whether additional toxicology work may be needed. That threshold is a regulatory testing trigger, not a known toxicity cutoff. The published pilot had industry involvement, which is one reason the FDA’s independent regulatory review matters more than any single paper.\n\nIn the dermal studies FDA reviewed, the tested 6% bemotrizinol formulations did not show signals of irritation, phototoxicity, or photoallergenicity under the study conditions. That does not mean every finished sunscreen will agree with every person: preservatives, fragrances, solvents, and other ingredients can still affect tolerance.",
+        "title": "What about absorption and skin safety?"
+      }
+    },
+    {
+      "id": "n_e8f1",
+      "kind": "content",
+      "public": {
+        "body": "Bemotrizinol is more useful to think about as a formulation tool than as a skin-type treatment. Its arrival may give U.S. manufacturers more ways to build broad-spectrum sunscreens, especially when they want a photostable filter that can work alongside other actives.\n\nBut the presence of bemotrizinol cannot tell you whether a sunscreen will feel light, leave a cast, pill under makeup, sting your eyes, or work well during exercise. Those are properties of the finished formulation.\n\nIf your current broad-spectrum sunscreen is comfortable enough that you apply it consistently and in an adequate amount, a new filter on the market does not make that product suddenly inadequate.",
+        "media": {
+          "alt": "Two adults relaxing on beach loungers with sun protection nearby.",
+          "caption": "Sun exposure is a real-world behavior question as much as a formulation question.",
+          "src": "/img/req_agent_bemotrizinol_us_sunscreen_filter_20260917_01/9d978b61b810d9626730800a31758cd141129fff60334dd0e90c44b35f283689.webp",
+          "type": "image"
+        },
+        "title": "Who it suits"
+      }
+    },
+    {
+      "id": "n_f4a6",
+      "kind": "content",
+      "public": {
+        "body": "First, “new” means newly permitted under the U.S. OTC sunscreen monograph. It does not mean bemotrizinol was invented in 2026.\n\nSecond, the order does not mean every sunscreen containing older U.S. filters has become unsafe. The FDA explicitly says that its earlier request for more data on several existing filters was not a conclusion that those ingredients are unsafe.\n\nThird, an effective regulatory date is not the same as instant shelf availability. The FDA says manufacturers determine when compliant products reach retail shelves. The final order also provides an 18-month statutory exclusivity period for DSM Nutritional Products or its licensees, assignees, or successors under the terms of the order.\n\nAnd finally, a filter is not a finished sunscreen. SPF, broad-spectrum performance, water resistance, stability, texture, and how reliably you use the product all matter more to real-world protection than chasing a single ingredient.",
+        "title": "How people get the FDA change wrong"
+      }
+    },
+    {
+      "id": "n_g1b9",
+      "kind": "content",
+      "public": {
+        "body": "The FDA order allows bemotrizinol to be used in permitted combinations rather than requiring it to work alone. Good sunscreen formulation is usually a team effort: different filters cover different parts of the UV spectrum, and the vehicle has to keep them stable and evenly distributed on skin.\n\nThe FDA’s scientific review specifically notes literature showing that bemotrizinol can improve the light stability of avobenzone and octinoxate. That is a useful formulation property, but it still does not let us predict the performance of a bottle from the ingredient list alone. Finished products must meet the applicable monograph testing and labeling requirements.",
+        "title": "How it works with other sunscreen filters"
+      }
+    },
+    {
+      "id": "n_h6c3",
+      "kind": "content",
+      "public": {
+        "body": "Bemotrizinol is a meaningful addition to the U.S. sunscreen toolkit: it offers broad UVA-and-UVB absorption, strong photostability, low overall systemic absorption in the evidence FDA reviewed, and useful compatibility with other filters.\n\nWhat it does not do is divide sunscreens into “old and bad” versus “new and good.” A well-tested sunscreen that you tolerate and actually use is still doing the job it was designed to do. Bemotrizinol gives formulators another option, and over time that may give you more finished products to choose from.",
+        "title": "The bottom line"
+      }
+    },
+    {
+      "id": "n_i5d8",
+      "kind": "content",
+      "public": {
+        "body": "FDA Final Administrative Order OTC000039\nhttps://www.accessdata.fda.gov/drugsatfda_docs/omuf/Order/OTC000039_Final_Administrative_Order062026.pdf\n\nFDA Questions and Answers on OTC sunscreen regulatory actions\nhttps://www.fda.gov/drugs/understanding-over-counter-medicines/questions-and-answers-fdas-regulatory-actions-over-counter-sunscreen\n\nFDA Scientific Review Supporting Proposed Administrative Order OTC000039\nhttps://www.accessdata.fda.gov/drugsatfda_docs/omuf/order/supportDoc/OTC000039/Internal_Documents/2025.12.09%20ScientificReview_BemotrizinolOTC000039_090026f88e15dab7.pdf\n\nFDA Summary of Clinical Pharmacology Studies for bemotrizinol\nhttps://www.accessdata.fda.gov/drugsatfda_docs/omuf/order/supportDoc/OTC000039/2.7.2_Summary_of_Clinical_Pharmacology_Studies/rev_summary-clin-pharm_090026f88e125e08.pdf\n\nRuiz et al. Preliminary clinical pharmacokinetic evaluation of bemotrizinol (2023)\nhttps://pubmed.ncbi.nlm.nih.gov/36738872/\n\nRigoni et al. In Silico Perspective on Organic UV Filters, including bemotrizinol (ACS Omega, 2026)\nhttps://pubs.acs.org/doi/10.1021/acsomega.5c09234",
+        "title": "Sources"
+      }
+    },
+    {
+      "id": "n_j7e4",
+      "kind": "action",
+      "public": {
+        "ctaLink": "/learn/library",
+        "ctaText": "Read more practical sunscreen guidance"
+      }
+    }
+  ],
+  "seo": {
+    "meta_description": "Bemotrizinol is now permitted in U.S. sunscreens. Here is what the FDA found, how the filter works, and why your current sunscreen is not suddenly outdated.",
+    "meta_title": "Bemotrizinol Sunscreen: What the 2026 FDA Change Means"
+  },
+  "slug": "bemotrizinol-us-sunscreen-filter",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Final Administrative Order OTC000039: Bemotrizinol",
+        "publisher": "U.S. Food and Drug Administration",
+        "source_id": "src_fda_order",
+        "url": "https://www.accessdata.fda.gov/drugsatfda_docs/omuf/Order/OTC000039_Final_Administrative_Order062026.pdf"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Questions and Answers: FDA’s Regulatory Actions on Over-the-Counter Sunscreen",
+        "publisher": "U.S. Food and Drug Administration",
+        "source_id": "src_fda_qa",
+        "url": "https://www.fda.gov/drugs/understanding-over-counter-medicines/questions-and-answers-fdas-regulatory-actions-over-counter-sunscreen"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Scientific Review Supporting Proposed Administrative Order OTC000039",
+        "publisher": "U.S. Food and Drug Administration",
+        "source_id": "src_fda_review",
+        "url": "https://www.accessdata.fda.gov/drugsatfda_docs/omuf/order/supportDoc/OTC000039/Internal_Documents/2025.12.09%20ScientificReview_BemotrizinolOTC000039_090026f88e15dab7.pdf"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Summary of Clinical Pharmacology Studies for Bemotrizinol",
+        "publisher": "U.S. Food and Drug Administration",
+        "source_id": "src_fda_clinpharm",
+        "url": "https://www.accessdata.fda.gov/drugsatfda_docs/omuf/order/supportDoc/OTC000039/2.7.2_Summary_of_Clinical_Pharmacology_Studies/rev_summary-clin-pharm_090026f88e125e08.pdf"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "Preliminary Clinical Pharmacokinetic Evaluation of Bemotrizinol",
+        "publisher": "Regulatory Toxicology and Pharmacology / PubMed",
+        "source_id": "src_ruiz_2023",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/36738872/"
+      },
+      {
+        "accessed_at": "2026-09-17",
+        "name": "In Silico Perspective on Avobenzone, Octisalate, Octocrylene, Homosalate, and Bemotrizinol as Organic UV Filters",
+        "publisher": "ACS Omega",
+        "source_id": "src_rigoni_2026",
+        "url": "https://pubs.acs.org/doi/10.1021/acsomega.5c09234"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "ingredients",
+    "tags": [
+      "sun-protection",
+      "skin-science",
+      "dermatology",
+      "ingredients"
+    ]
+  },
+  "title": "There’s a New Sunscreen Ingredient in the U.S. — What Bemotrizinol Actually Changes"
+}
