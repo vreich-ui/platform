@@ -31,6 +31,7 @@ export const REGISTERED_SECTION_TYPES = [
   'form_confirmation',
   'steps',
   'content_split',
+  'before_after',
   'pricing_table',
   'media',
   'brand_row',

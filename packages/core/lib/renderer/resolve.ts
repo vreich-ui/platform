@@ -154,7 +154,7 @@ type HeroLikeData = { actions?: Array<{ target: NavTarget }> };
 type LinkListLikeData = { links?: Array<{ target: NavTarget }> };
 type ProductPreviewLikeData = { source: ProductPreviewSource; limit: number };
 type PricingTableLikeData = { tiers?: Array<{ product: string }> };
-/** Internal identity for de-duplicating product manual picks against fallback backfill. */
+/** Internal identity for de-duplicating product manual picks against fallback-query backfill. */
 type ProductPreviewCardInternal = ProductPreviewCard;
 type ContentGridLikeData = { source: ContentGridSource; limit: number };
 
@@ -208,6 +208,11 @@ const resolvedFor = (type: SectionType, data: unknown, deps: ResolvePageDeps): u
     return {
       actionHrefs: ((data as HeroLikeData).actions ?? []).map((action) => deps.resolveActionHref(action.target)),
     };
+  }
+  // before_after has at most one standard action.
+  if (type === 'before_after') {
+    const action = (data as { action?: { target: NavTarget } }).action;
+    return action ? { actionHref: deps.resolveActionHref(action.target) } : {};
   }
   // pricing_table (W5): tiers resolve against commerce data, index-aligned.
   if (type === 'pricing_table') {

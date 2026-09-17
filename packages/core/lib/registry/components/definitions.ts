@@ -13,6 +13,7 @@
  * that list without a definition here — or a definition here that is not a
  * registered type — is a compile error, exactly like `index.ts`'s binding map.
  */
+import { beforeAfterDefinition } from './before-after.js';
 import { bioDefinition } from './bio.js';
 import { brandRowDefinition } from './brand-row.js';
 import { checklistDefinition } from './checklist.js';
@@ -63,6 +64,7 @@ export const SECTION_DEFINITIONS: Record<
   form_confirmation: formConfirmationDefinition,
   steps: stepsDefinition,
   content_split: contentSplitDefinition,
+  before_after: beforeAfterDefinition,
   pricing_table: pricingTableDefinition,
   media: mediaDefinition,
   brand_row: brandRowDefinition,

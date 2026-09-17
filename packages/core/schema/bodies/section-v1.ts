@@ -429,6 +429,31 @@ export const sectionInstanceSchema = z.discriminatedUnion('type', [
     // 'stack' (both images flush). Absent = 'stagger' = today byte-exactly.
     imageLayout: z.enum(['stagger', 'stack']).optional(),
   }),
+  // Fixed two-image comparison: exactly one before image and one after image,
+  // each with visible label + accessible alt; optional shared caption and one
+  // standard CTA. Separate fields make "exactly two" structural rather than a
+  // convention an author can accidentally violate.
+  sectionVariant('before_after', {
+    kicker: z.string().optional(),
+    heading: z.string().optional(),
+    before: z
+      .object({
+        src: z.string().min(1),
+        alt: z.string().min(1),
+        label: z.string().min(1).max(48),
+      })
+      .strict(),
+    after: z
+      .object({
+        src: z.string().min(1),
+        alt: z.string().min(1),
+        label: z.string().min(1).max(48),
+      })
+      .strict(),
+    caption: z.string().min(1).max(240).optional(),
+    action: linkActionSchema.optional(),
+    anchor: z.string().optional(),
+  }),
   // Product-linked pricing tiers (W5 /pricing, plan §4): each tier REFERENCES
   // a product object — price badge + availability resolve from the SAME
   // commerce data at build (no copy drift; repointable; the design-principles

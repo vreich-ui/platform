@@ -13,6 +13,7 @@
  */
 import type { AstroComponentFactory } from 'astro/runtime/server/index.js';
 
+import BeforeAfter from '../../../components/sections/BeforeAfter.astro';
 import Bio from '../../../components/sections/Bio.astro';
 import Checklist from '../../../components/sections/Checklist.astro';
 import ContactForm from '../../../components/sections/ContactForm.astro';
@@ -39,6 +40,7 @@ import Stats from '../../../components/sections/Stats.astro';
 import Timeline from '../../../components/sections/Timeline.astro';
 import Testimonial from '../../../components/sections/Testimonial.astro';
 
+import { beforeAfterDefinition } from './before-after.js';
 import { bioDefinition } from './bio.js';
 import { checklistDefinition } from './checklist.js';
 import { contactFormDefinition } from './contact-form.js';
@@ -109,6 +111,7 @@ export const componentRegistry: Record<RegisteredSectionType, RegisteredComponen
   timeline: bind(timelineDefinition, Timeline),
   comparison_table: bind(comparisonTableDefinition, ComparisonTable),
   content_split: bind(contentSplitDefinition, ContentSplit),
+  before_after: bind(beforeAfterDefinition, BeforeAfter),
   composition: bind(compositionDefinition, Composition),
   pricing_table: bind(pricingTableDefinition, PricingTable),
 };
