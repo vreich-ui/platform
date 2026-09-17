@@ -111,6 +111,10 @@ export type CompositionResolved = {
 export type ContentSplitResolved = {
   actionHrefs: string[];
 };
+/** before_after: the optional single CTA resolved through the standard action policy. */
+export type BeforeAfterResolved = {
+  actionHref?: string;
+};
 /**
  * pricing_table (W5): each tier's product reference resolved from the SAME
  * commerce data the shop renders — title (tier override wins), price badge by
@@ -164,7 +168,7 @@ export type SectionRenderProps<TData, TResolved> = {
  * waves) sticky/floating/overlay layers. Until this type existed, every
  * section kind was implicitly `flow` and nothing said so, so the first sticky
  * kind would have had to invent the vocabulary at the same time as the
- * behaviour. Declaring it now, while the answer is `flow` for all 25 kinds,
+ * behaviour. Declaring it now, while the answer is `flow` for all 26 kinds,
  * is what makes the region table derivable rather than hand-authored.
  *
  * `footprint` is REQUIRED: `region-registry.ts` keys a total `Record` off the
