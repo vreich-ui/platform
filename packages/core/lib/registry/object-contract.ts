@@ -1105,18 +1105,18 @@ const workflow = (objectType: ObjectType, policy: ApprovalPolicy) => ({
           `REUSE FIRST: object_inventory({object_type: "${objectType}"}) lists every existing ${objectType} with a self-describing recipe summary (description, whenToUse, scope) — pick one and object_get it; create a NEW recipe only when none fits, and give it description/whenToUse/scope so the next agent can reuse yours.`,
         ]
       : []),
-    // ART-1: articles have ONE production path. The sequence says so FIRST,
-    // before the generic create step, because the contract is the only place
-    // an agent reliably reads before writing.
+    // ART-1 is an admin-chat rule, not a tenant MCP rule. Say that FIRST so
+    // a publishing plugin/chat never reaches for CMS-Agent-only workflow tools
+    // that are deliberately absent from its plane.
     ...(objectType === 'content_item'
       ? [
-          'START PRODUCTION, DO NOT HAND-BUILD: a NEW article is produced by the publishing workflow — run_workspace_workflow (the editor’s brief verbatim as input.instructions) → check_workspace_run_readiness → publish_workspace_run → release_workspace_run. The workflow is what produces the sourcing, claim, compliance and score record ART-2 requires to publish, and the aggression ceiling is enforced only on that path. A direct object_create of a content_item is REFUSED in admin chat; the steps below apply to an article that already exists.',
+          'NEW ARTICLE — choose the available plane. CMS-Agent/admin-chat plane: run_workspace_workflow (the editor’s brief verbatim as input.instructions) → check_workspace_run_readiness → publish_workspace_run → release_workspace_run; this produces the workspace readiness/judgement record and applies the aggression ceiling. External MCP/chat plane (regular chat, custom GPTs and agents): object_validate(candidate body) → object_create → object_checkout → object_publish → object_checkin → release_to_production. The direct path does not produce the CMS-Agent workspace readiness/judgement record and the aggression ceiling is not server-enforced there, so read and obey this contract’s aggression_ceiling. Direct object_create(content_item) is refused only in the internal admin-chat registry, not on an authorized MCP publishing plane.',
         ]
       : []),
     'object_contract (this call) → read the schema, ops, constraints',
     `object_validate (object_type: "${objectType}" + body, NO object_id) — dry-run the candidate body BEFORE creating it: the identical checks object_create runs (id pattern/availability, singleton conflict where applicable, body schema, id discipline, reference integrity, PageType/route/slug/taxonomy law where applicable), read-only, zero writes.`,
     objectType === 'content_item'
-      ? 'object_create (omit requested_id to mint one) — operator/workflow path only; refused in admin chat, see the production step above'
+      ? 'object_create (omit requested_id to mint one) — create a new content_item on the external MCP/chat plane; internal admin chat is refused and must use the CMS-Agent workflow'
       : 'object_create (omit requested_id to mint one) — for a new object',
     ...(objectType === 'content_item'
       ? [
