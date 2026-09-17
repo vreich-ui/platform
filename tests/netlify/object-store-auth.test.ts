@@ -193,3 +193,74 @@ test('object-verbs mints only through the shared mintId helper (no inline id gen
   assert.ok(!/randomUUID/.test(source), 'no inline UUID id generation');
   assert.ok(!/createHash/.test(source), 'no inline hashing — that belongs to mintId');
 });
+
+// ═══ M3.3: the visual-identity snapshot action ══════════════════════════════
+
+/**
+ * `admin-object{action:'visual_identity_snapshot'}` is the ONE call that
+ * replaced seventeen on `/admin/settings/visual-identity` (four `list`s and a
+ * `get` per id across `template`, `section_template`, `theme` and
+ * `visual_standard`). It is handled ahead of the verb schema, so these cases
+ * exist to prove it did not step outside this function's auth gate on the way:
+ * it is the same 401, the same 403, and it grants exactly what those seventeen
+ * admin reads granted, never more.
+ *
+ * Note which store this runs against: the local file-backed shim, which
+ * reports no etags. The snapshot can therefore never be TRUSTED here and every
+ * call rebuilds from the records — the documented degradation
+ * (`visual-identity/snapshot-doc.ts`), and the honest thing for this file to
+ * exercise, because it proves the repair path answers correctly on its own.
+ */
+const visualIdentityThemeBody = () => ({
+  name: 'Editorial airy',
+  description: 'A token-axis demonstration preset, created to prove the snapshot action carries bodies.',
+  whenToUse: 'Apply to preview the design axes on the live palette; revert with the default theme.',
+  scope: 'evergreen',
+  tokens: {
+    colors: { ink: '#111111', paper: '#ffffff' },
+    fonts: { sans: 'Inter', serif: 'Lora', heading: 'Inter' },
+  },
+});
+
+test('admin-object: the visual-identity snapshot is 401 unauthenticated and 403 for a non-admin identity', async () => {
+  const anon = parse(await adminObjectHandler(post({ action: 'visual_identity_snapshot' })));
+  assert.equal(anon.status, 401);
+  const nonAdmin = parse(
+    await adminObjectHandler(post({ action: 'visual_identity_snapshot' }), adminContext('nobody@example.com'))
+  );
+  assert.equal(nonAdmin.status, 403);
+});
+
+test('admin-object: ONE snapshot call answers the four collections the seventeen reads used to', async () => {
+  await reset();
+  const created = parse(
+    await adminObjectHandler(
+      post({
+        action: 'create',
+        object_type: 'theme',
+        site: 'site_drlurie',
+        body: visualIdentityThemeBody(),
+        requested_id: 'thm_drlurie_airy',
+      }),
+      adminContext('admin@drlurie.com')
+    )
+  );
+  assert.equal(created.status, 200, JSON.stringify(created.json));
+
+  const snapshot = parse(
+    await adminObjectHandler(post({ action: 'visual_identity_snapshot' }), adminContext('admin@drlurie.com'))
+  );
+  assert.equal(snapshot.status, 200, JSON.stringify(snapshot.json));
+  const records = snapshot.json.records as Record<string, ObjectRecord[]>;
+  assert.deepEqual(Object.keys(records).sort(), ['section_template', 'template', 'theme', 'visual_standard']);
+  assert.equal(records.theme?.length, 1);
+  const theme = records.theme?.[0] as ObjectRecord;
+  assert.equal(theme.object_id, 'thm_drlurie_airy');
+  // The BODY is there — that is the whole point; a summary row would have made
+  // the page fetch every record anyway.
+  assert.equal((theme.body as { name: string }).name, 'Editorial airy');
+  // …and the ledger is not, with its length kept so nothing is pretended.
+  assert.deepEqual(theme.history, []);
+  assert.equal((theme as unknown as { history_length: number }).history_length, 1);
+  assert.equal(typeof snapshot.json.as_of, 'string');
+});

@@ -21,7 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer, type Server } from 'node:http';
 
-import { requestSchema, cmsAgentProbe, CMS_AGENT_PROBE_TIMEOUT_MS, __resetCmsAgentProbeCacheForTesting } from './admin-governance.js';
+import { requestSchema } from './admin-governance.js';
+import { probeCmsAgent, CMS_AGENT_PROBE_TIMEOUT_MS } from '../lib/governance/cms-agent-probe.js';
 import { PLATFORM_ENV_NAMES, type SiteBinding } from '../lib/site-binding.js';
 
 describe('admin-governance requestSchema — agent_keys_* verbs', () => {
@@ -105,14 +106,13 @@ describe('admin-governance source wiring — T2.3 ETag only on the two read verb
 
     assert.match(
       source,
-      // Window widened from 80 (T-perf), then again from 400 (T-perf wave 3,
-      // when the doc read and the probe each grew a timeSection wrapper plus
-      // a longer explanatory comment): the `get` branch opens with the
-      // single doc read + CMS-Agent probe it runs concurrently, which is
-      // several lines of comment and code before the response is built. The
-      // assertion still says the same thing — `get` answers through
-      // readJsonResponse, never the plain no-store jsonResponse.
-      /req\.verb === 'get'\)\s*\{[\s\S]{0,700}return readJsonResponse\(event, \{/,
+      // Window widened from 80 (T-perf), to 400 (T-perf wave 3), and now to
+      // 1400 (M3.4): the `get` branch opens with the one snapshot read and
+      // the note stating what it replaced — a live CMS-Agent probe on a page
+      // path — before the response is built. The assertion still says the
+      // same thing: `get` answers through readJsonResponse, never the plain
+      // no-store jsonResponse.
+      /req\.verb === 'get'\)\s*\{[\s\S]{0,1400}return readJsonResponse\(event, \{/,
       "verb 'get' must respond via readJsonResponse, not the plain no-store jsonResponse"
     );
     assert.match(
@@ -175,12 +175,55 @@ describe('admin-governance source wiring — T-perf: one doc read, probe in para
     return readFileSync(path.join(root, 'packages/core/server/functions/admin-governance.ts'), 'utf8');
   };
 
-  it('the get branch reads the governance doc once and starts the CMS-Agent probe alongside it', () => {
+  /**
+   * M3.4 supersedes the wave-2 assertion that used to live here (the get
+   * branch starting `getGovernanceDoc` and `cmsAgentProbe` together under one
+   * `Promise.all`). Concurrency was the best answer available while the probe
+   * was on the page path at all; it is not one now. The branch reads ONE blob
+   * — `snapshots/governance.json` — and makes no network call, so the shape
+   * to pin is the absence of the probe, not its parallelism.
+   */
+  it('the get branch reads the governance snapshot and nothing else', () => {
+    const source = governanceSource();
+    const getBranch = source.slice(
+      source.indexOf("req.verb === 'get'"),
+      source.indexOf("req.verb === 'agent_keys_list'")
+    );
+    assert.match(
+      getBranch,
+      /const \{ snapshot, repaired \} = await timeSection\('snapshot', \(\) => loadGovernanceSnapshot\(store, Date\.now\(\)\)\);/,
+      'the get branch must serve from snapshots/governance.json, attributed via timeSection'
+    );
+    assert.doesNotMatch(
+      getBranch,
+      /getGovernanceDoc\(/,
+      'a page read must not go to overrides.v1 directly — the repair inside loadGovernanceSnapshot is the only path there'
+    );
+  });
+
+  it('nothing in admin-governance can reach the CMS-Agent probe — the milestone is "a page never probes"', () => {
+    const source = governanceSource();
+    assert.doesNotMatch(
+      source,
+      /from '[^']*cms-agent-probe/,
+      'importing the probe module would put a live cross-service call back inside a page path'
+    );
+    assert.doesNotMatch(
+      source,
+      /new CmsAgentClient\(/,
+      'admin-governance must not construct a CMS-Agent client; functions/governance-probe-refresh.ts owns the probe'
+    );
+    // The env-NAME check stays: it costs no network and answers the one state
+    // an operator can act on (this tenant has no CMS-Agent credentials).
+    assert.match(source, /cmsAgentMissingEnvVars\(binding\.env\)/, 'configured must still be answered live');
+  });
+
+  it('a governance write refreshes the snapshot, so an Owner reads their own change back', () => {
     const source = governanceSource();
     assert.match(
       source,
-      /const \[doc, probe\] = await Promise\.all\(\[\s*timeSection\('doc', \(\) => getGovernanceDoc\(store\)\),\s*timeSection\('probe', \(\) => cmsAgentProbe\(binding\)\),?\s*\]\);/,
-      'the get branch must start the doc read and the CMS-Agent probe together, each attributed via timeSection'
+      /await putGovernanceDoc\(store, next\);[\s\S]{0,1200}await refreshGovernanceSnapshotAfterWrite\(store, next, Date\.now\(\)\);/,
+      'every governance write must be a writer of snapshots/governance.json'
     );
   });
 
@@ -203,11 +246,8 @@ describe('admin-governance source wiring — T-perf: one doc read, probe in para
     );
   });
 
-  it('the CMS-Agent probe takes nothing from the governance doc, so it can start before the doc is read', () => {
+  it('the doc-derived legacy-override field survives the move to the snapshot', () => {
     const source = governanceSource();
-    const probe = source.slice(source.indexOf('export const cmsAgentProbe'), source.indexOf('const cmsAgentStatus'));
-    assert.doesNotMatch(probe, /\bdoc\b|legacyOverride/, 'cmsAgentProbe must not depend on the governance doc');
-    // The doc-derived field still exists — it just moved to the pure assembler.
     assert.match(source, /legacy_mode_override_ignored: legacyOverride/, 'the legacy-override field must survive');
   });
 });
@@ -230,26 +270,33 @@ describe('admin-governance source wiring — T-perf: one doc read, probe in para
  * the cold case and the memo is the fix for the warm one).
  */
 describe('admin-governance source wiring — T-perf wave 3: Server-Timing sections for the get verb', () => {
-  const governanceSource = () => {
+  const repoRoot = () => {
     let root = path.dirname(fileURLToPath(import.meta.url));
     while (root !== path.dirname(root)) {
       if (existsSync(path.join(root, 'netlify.toml')) && existsSync(path.join(root, 'packages/core/admin'))) break;
       root = path.dirname(root);
     }
-    return readFileSync(path.join(root, 'packages/core/server/functions/admin-governance.ts'), 'utf8');
+    return root;
   };
+  const governanceSource = () =>
+    readFileSync(path.join(repoRoot(), 'packages/core/server/functions/admin-governance.ts'), 'utf8');
+  const probeSource = () =>
+    readFileSync(path.join(repoRoot(), 'packages/core/server/lib/governance/cms-agent-probe.ts'), 'utf8');
 
-  it('the doc read and the CMS-Agent probe are each attributed via timeSection', () => {
+  it('the one thing the get branch does is attributed via timeSection', () => {
     const source = governanceSource();
-    assert.ok(source.includes("timeSection('doc'"), "work must be attributable per section — missing timeSection('doc'");
     assert.ok(
-      source.includes("timeSection('probe'"),
-      "work must be attributable per section — missing timeSection('probe'"
+      source.includes("timeSection('snapshot'"),
+      "work must be attributable per section — missing timeSection('snapshot'"
     );
   });
 
   it('the health-probe client is given a deliberate, tight timeout — not CmsAgentClient\'s 90s conversational default', () => {
-    const source = governanceSource();
+    // M3.4: the constant and the client moved to lib/governance/cms-agent-probe.ts
+    // with the probe. The budget matters slightly less now (nobody waits on
+    // it) and slightly more in one respect: it runs on a schedule across six
+    // tenants, so an unbounded probe is an unbounded scheduled-function bill.
+    const source = probeSource();
     assert.match(
       source,
       /export const CMS_AGENT_PROBE_TIMEOUT_MS = 3_000;/,
@@ -259,6 +306,11 @@ describe('admin-governance source wiring — T-perf wave 3: Server-Timing sectio
       source,
       /new CmsAgentClient\(\{ timeoutMs: CMS_AGENT_PROBE_TIMEOUT_MS \}\)/,
       "the health-probe-only client must override CmsAgentClient's default timeout, not inherit the 90s conversational one"
+    );
+    assert.match(
+      source,
+      /const newProbeClient = \(\) => new CmsAgentClient/,
+      'a module-scope client would answer from its own five-minute agent_ref memo — a green light with no packet behind it'
     );
   });
 });
@@ -343,17 +395,17 @@ describe('admin-governance CMS-Agent probe — bounded timeout and an effective 
 
   beforeEach(() => {
     fastToolCalls = [];
-    __resetCmsAgentProbeCacheForTesting();
   });
 
-  it('a hung CMS-Agent degrades the probe to an unknown status within the configured budget, never the 90s default', async () => {
+  it('a hung CMS-Agent degrades the probe to an unreachable RESULT within the configured budget, never the 90s default', async () => {
     const start = performance.now();
-    const probe = await cmsAgentProbe(binding(hangEndpoint));
+    const probe = await probeCmsAgent(binding(hangEndpoint));
     const elapsedMs = performance.now() - start;
 
-    assert.deepEqual(probe.missing, []);
-    assert.equal((probe.health as { ok?: boolean } | undefined)?.ok, false, 'a hung probe must degrade, not throw');
-    assert.equal((probe.health as { code?: string } | undefined)?.code, 'cms_agent_timeout');
+    assert.equal(probe.reachable, false, 'a hung probe must degrade to a result, not throw');
+    assert.equal(probe.code, 'cms_agent_timeout');
+    assert.equal(probe.agent_ref, null);
+    assert.ok(typeof probe.checked_at === 'string' && probe.checked_at.length > 0, 'every probe states when it was taken');
     // Bounded by CMS_AGENT_PROBE_TIMEOUT_MS, with slack for CI scheduling —
     // nowhere near CmsAgentClient's 90_000 ms conversational default.
     assert.ok(
@@ -362,13 +414,30 @@ describe('admin-governance CMS-Agent probe — bounded timeout and an effective 
     );
   });
 
-  it('a repeat probe within the TTL reuses the memo instead of calling CMS-Agent again', async () => {
-    const first = await cmsAgentProbe(binding(fastEndpoint));
-    assert.equal((first.health as { ok?: boolean } | undefined)?.ok, true);
+  /**
+   * M3.4 replaces the wave-3 memo test that used to sit here.
+   *
+   * The 60 s module-scope memo existed because the probe ran on a PAGE PATH
+   * and had to be de-duplicated across the requests of one warm container.
+   * There is no page path any more: the only caller is a five-minute
+   * schedule, which has nothing to de-duplicate, and a memo whose remaining
+   * effect would be to let a pass publish a `checked_at` it did not take is a
+   * lie about the one field that makes a stale verdict readable. So every
+   * pass takes a real probe, and this pins that.
+   */
+  it('every pass takes a fresh probe — there is no memo left to serve a reading nobody took', async () => {
+    const first = await probeCmsAgent(binding(fastEndpoint));
+    assert.equal(first.reachable, true);
+    assert.equal(first.agent_ref, 'agt_client_manager@2');
     assert.deepEqual(fastToolCalls, ['agent_resolve'], 'the first call must actually reach CMS-Agent');
 
-    const second = await cmsAgentProbe(binding(fastEndpoint));
-    assert.deepEqual(second, first, 'a repeat within the TTL must return the same memoized status');
-    assert.deepEqual(fastToolCalls, ['agent_resolve'], 'a repeat within the TTL must not call CMS-Agent again');
+    const second = await probeCmsAgent(binding(fastEndpoint), Date.parse('2026-09-16T12:00:00.000Z'));
+    assert.equal(second.reachable, true);
+    assert.equal(second.checked_at, '2026-09-16T12:00:00.000Z', 'checked_at is the moment THIS pass asked');
+    assert.deepEqual(
+      fastToolCalls,
+      ['agent_resolve', 'agent_resolve'],
+      'a second pass must ask again — a scheduled probe has nothing to memoize'
+    );
   });
 });

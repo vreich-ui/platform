@@ -17,7 +17,7 @@ import {
 
 const getToken: GetToken = async () => 'test-token';
 
-const record = (id: string, type: 'template' | 'section_template' | 'theme'): StudioRecord =>
+const record = (id: string, type: 'template' | 'section_template' | 'theme' | 'visual_standard'): StudioRecord =>
   ({
     object_id: id,
     object_type: type,
@@ -38,6 +38,13 @@ const record = (id: string, type: 'template' | 'section_template' | 'theme'): St
  * would for a small fixed catalog per type — lets a test assert exactly how
  * many requests a fetch issued (the whole point of the parallel-vs-serial
  * fix) without depending on real network or timing.
+ *
+ * M3.3: this mock answers `visual_identity_snapshot` with a 400, which is what
+ * an endpoint that does not know the action does — so every case below now
+ * exercises the FALLBACK path (one refused snapshot call, then the four lists
+ * and their gets). That is deliberate: the seventeen-call path is still the
+ * repair, and it still has to be right. The snapshot path has its own cases at
+ * the end of this file.
  */
 const mockObjectVerb = (catalog: Record<string, string[]>) => {
   const calls: Array<Record<string, unknown>> = [];
@@ -51,7 +58,7 @@ const mockObjectVerb = (catalog: Record<string, string[]>) => {
       return new Response(JSON.stringify({ objects: ids.map((id) => ({ object_id: id })) }), { status: 200 });
     }
     if (body.action === 'get') {
-      const type = body.object_type as 'template' | 'section_template' | 'theme';
+      const type = body.object_type as 'template' | 'section_template' | 'theme' | 'visual_standard';
       const id = body.object_id as string;
       return new Response(JSON.stringify({ record: record(id, type) }), { status: 200 });
     }
@@ -122,10 +129,12 @@ describe('fetchStudioData — parallel per-id fetching', () => {
     assert.equal(data.templates.length, 2);
     assert.equal(data.sections.length, 1);
     assert.equal(data.themes.length, 3);
-    // 3 `list` calls + 6 `get` calls = 9 total; the count itself doesn't
-    // prove parallelism, but confirms every id across all three types was
-    // actually fetched, not silently dropped by the switch to Promise.all.
-    assert.equal(mock.calls.length, 9);
+    assert.deepEqual(data.standards, [], 'a catalog with no visual_standard yields an empty collection, never a failure');
+    // 1 refused `visual_identity_snapshot` + 4 `list` calls + 6 `get` calls =
+    // 11 total; the count itself doesn't prove parallelism, but confirms every
+    // id across all four types was actually fetched, not silently dropped by
+    // the switch to Promise.all.
+    assert.equal(mock.calls.length, 11);
   });
 
   it('a slow id does not block the rest of its type from resolving (proves concurrency, not just correctness)', async () => {
@@ -133,8 +142,13 @@ describe('fetchStudioData — parallel per-id fetching', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      // M3.3: an endpoint that does not know the snapshot action, so this case
+      // keeps testing what it was written to test — the per-id fallback.
+      if (body.action === 'visual_identity_snapshot') {
+        return new Response(JSON.stringify({ error: 'unknown action' }), { status: 400 });
+      }
       if (body.action === 'list') {
-        // Only the `template` type carries ids — `section_template`/`theme`
+        // Only the `template` type carries ids — the other three
         // list empty, so the ids and call count below stay unambiguous.
         const ids = body.object_type === 'template' ? [{ object_id: 'tpl_slow' }, { object_id: 'tpl_fast' }] : [];
         return new Response(JSON.stringify({ objects: ids }), { status: 200 });
@@ -196,11 +210,12 @@ describe('fetchStudioData — in-flight de-dup', () => {
     const [r1, r2] = await Promise.all([fetchStudioData(getToken), fetchStudioData(getToken)]);
 
     assert.deepEqual(r1, r2);
-    // One fetch listing all 3 types (template/section_template/theme) plus
-    // one get for the single templated id = 4 calls total, not 8 — the
-    // second caller reused the first's in-flight promise rather than firing
-    // its own independent sweep.
-    assert.equal(mock.calls.length, 4);
+    // One refused snapshot call, one fetch listing all 4 types
+    // (template/section_template/theme/visual_standard) plus one get for the
+    // single templated id = 6 calls total, not 12 — the second caller reused
+    // the first's in-flight promise rather than firing its own independent
+    // sweep.
+    assert.equal(mock.calls.length, 6);
   });
 });
 
@@ -246,7 +261,7 @@ describe('invalidateStudioCache', () => {
 });
 
 describe('sessionStorage persistence', () => {
-  it('a successful fetch persists all three collections + a timestamp under the site-scoped key, never tokens', async () => {
+  it('a successful fetch persists all four collections + a timestamp under the site-scoped key, never tokens', async () => {
     const mock = mockObjectVerb({ template: ['tpl_a'], section_template: ['stpl_a'], theme: ['thm_a'] });
     restoreFetch = mock.restore;
 
@@ -256,12 +271,13 @@ describe('sessionStorage persistence', () => {
     const raw = (globalThis as { sessionStorage: Storage }).sessionStorage.getItem(key);
     assert.ok(raw);
     const parsed = JSON.parse(raw as string) as {
-      data: { templates: unknown[]; sections: unknown[]; themes: unknown[] };
+      data: { templates: unknown[]; sections: unknown[]; themes: unknown[]; standards: unknown[] };
       fetchedAt: number;
     };
     assert.equal(parsed.data.templates.length, 1);
     assert.equal(parsed.data.sections.length, 1);
     assert.equal(parsed.data.themes.length, 1);
+    assert.deepEqual(parsed.data.standards, []);
     assert.equal(typeof parsed.fetchedAt, 'number');
     assert.equal((raw as string).includes('token'), false);
   });
@@ -271,7 +287,7 @@ describe('sessionStorage persistence', () => {
     // prior page already wrote sessionStorage.
     const key = `${getSiteIdentity().siteSlug}-studio-cache`;
     const entry = {
-      data: { templates: [record('tpl_persisted', 'template')], sections: [], themes: [] },
+      data: { templates: [record('tpl_persisted', 'template')], sections: [], themes: [], standards: [] },
       fetchedAt: Date.now(),
     };
     (globalThis as { sessionStorage: Storage }).sessionStorage.setItem(key, JSON.stringify(entry));
@@ -326,5 +342,95 @@ describe('fetchStudioData — non-200 behavior', () => {
     };
 
     await assert.rejects(() => fetchStudioData(getToken), /nope/);
+  });
+});
+
+/**
+ * M3.3 — the one call that replaces seventeen.
+ *
+ * The page used to issue four `list`s and one `get` per id across four object
+ * types: seventeen `admin-object` invocations on drluriescience, each paying
+ * the same fixed per-invocation platform overhead. These cases pin the count
+ * at ONE, and pin what happens when the server cannot answer it.
+ */
+const snapshotBody = () => ({
+  action: 'visual_identity_snapshot',
+  as_of: '2026-09-16T00:00:00.000Z',
+  records: {
+    template: [record('tpl_a', 'template'), record('tpl_b', 'template')],
+    section_template: [record('stpl_a', 'section_template')],
+    theme: [record('thm_a', 'theme')],
+    visual_standard: [record('vis_house', 'visual_standard')],
+  },
+});
+
+const mockSnapshot = (respond: (body: Record<string, unknown>) => Response) => {
+  const calls: Array<Record<string, unknown>> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+    calls.push(body);
+    return respond(body);
+  }) as typeof fetch;
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+};
+
+describe('fetchStudioData — the visual-identity snapshot (M3.3)', () => {
+  it('ONE call answers all four collections', async () => {
+    const mock = mockSnapshot((body) =>
+      body.action === 'visual_identity_snapshot'
+        ? new Response(JSON.stringify(snapshotBody()), { status: 200 })
+        : new Response(JSON.stringify({ error: 'the snapshot path must not fall back here' }), { status: 500 })
+    );
+    restoreFetch = mock.restore;
+
+    const data = await fetchStudioData(getToken);
+
+    assert.equal(mock.calls.length, 1, 'seventeen calls became one');
+    assert.equal(mock.calls[0]?.action, 'visual_identity_snapshot');
+    assert.equal(data.templates.length, 2);
+    assert.equal(data.sections.length, 1);
+    assert.equal(data.themes.length, 1);
+    assert.equal(data.standards.length, 1);
+    assert.equal(data.standards[0]?.object_id, 'vis_house');
+  });
+
+  it('a body that is not the promised shape falls back to the per-type reads rather than painting an empty studio', async () => {
+    const mock = mockSnapshot((body) => {
+      if (body.action === 'visual_identity_snapshot') {
+        // `theme` missing entirely — the shape a partial or older answer has.
+        return new Response(JSON.stringify({ records: { template: [], section_template: [] } }), { status: 200 });
+      }
+      if (body.action === 'list') return new Response(JSON.stringify({ objects: [] }), { status: 200 });
+      return new Response(JSON.stringify({ error: 'unexpected' }), { status: 400 });
+    });
+    restoreFetch = mock.restore;
+
+    const data = await fetchStudioData(getToken);
+    assert.deepEqual(
+      mock.calls.map((call) => call.action),
+      ['visual_identity_snapshot', 'list', 'list', 'list', 'list']
+    );
+    assert.deepEqual(data, { templates: [], sections: [], themes: [], standards: [] });
+  });
+
+  it('a broken connection still throws — it is never answered with seventeen more requests', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      throw new Error('network down');
+    }) as typeof fetch;
+    restoreFetch = () => {
+      globalThis.fetch = originalFetch;
+    };
+
+    await assert.rejects(() => fetchStudioData(getToken), /network down/);
+    assert.equal(calls, 1);
   });
 });

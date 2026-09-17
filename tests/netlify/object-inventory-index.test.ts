@@ -43,6 +43,17 @@
  * cases for the snapshot live at the end of this file, next to the two-read
  * acceptance they build on: the release read's cost is the inventory's cost
  * plus one.
+ *
+ * ## M3 — two more snapshots, in two other stores, under the same scan
+ *
+ * `snapshots/chats.json` (the Agents hub) and `snapshots/members.json` (the
+ * Admins list) are not in the site-objects store at all — they live in
+ * `agent-chats` and `users`. They are pinned HERE anyway, by the same
+ * `KEY_HELPERS` scan, because the scan walks `packages/core/server/**` rather
+ * than one store, and the law it enforces — one module per materialised key —
+ * is the wave's, not the store's. Their behavioural cases are at the end of
+ * this file; both use the same `countingStore`, since what makes a snapshot
+ * trustworthy is what the STORE can prove about a conditional write.
  */
 import '../../sites/drlurie/config/policy-bindings.js';
 import assert from 'node:assert/strict';
@@ -90,6 +101,70 @@ import {
   RELEASE_SNAPSHOT_MAX_AGE_MS,
   type ReleaseSnapshot,
 } from '../../packages/core/server/lib/release/snapshot-store.js';
+import {
+  chatDocKey,
+  readChatList,
+  saveChatDoc,
+  type AgentChatStore,
+  type ChatDoc,
+} from '../../packages/core/server/lib/agent/chat-store.js';
+import {
+  readChatSnapshot,
+  CHAT_SNAPSHOT_KEY,
+} from '../../packages/core/server/lib/agent/chat-snapshot-view.js';
+import {
+  armChatSnapshotRow,
+  chatRowNeedsCommit,
+  chatSnapshotRow,
+  CHAT_ROW_TOUCH_TOLERANCE_MS,
+} from '../../packages/core/server/lib/agent/chat-snapshot-store.js';
+import { visibleChatDocs } from '../../packages/core/server/lib/agent/chat-visibility.js';
+import {
+  countActiveOwners,
+  listMembers,
+  readMemberList,
+} from '../../packages/core/server/lib/membership/read.js';
+import { newMember, saveMember } from '../../packages/core/server/lib/membership/write.js';
+import { scrubPerson } from '../../packages/core/server/lib/membership/offboarding.js';
+import { KEYS, type MembershipStore } from '../../packages/core/server/lib/membership/store.js';
+import {
+  readMembersSnapshot,
+  MEMBERS_SNAPSHOT_KEY,
+} from '../../packages/core/server/lib/membership/snapshot-view.js';
+import { armMembersSnapshot } from '../../packages/core/server/lib/membership/snapshot-store.js';
+import { listUserRecords, memberToUserRecord } from '../../packages/core/server/lib/users-store.js';
+import {
+  readVisualIdentitySnapshot,
+  readVisualIdentitySnapshotDoc,
+  VISUAL_IDENTITY_OBJECT_TYPES,
+  VISUAL_IDENTITY_SNAPSHOT_KEY,
+  type VisualIdentitySnapshotStore,
+} from '../../packages/core/server/lib/visual-identity/snapshot-store.js';
+import {
+  buildGovernanceSnapshot,
+  cmsAgentHealthFromProbe,
+  cmsAgentProbeView,
+  loadGovernanceSnapshot,
+  readGovernanceSnapshot,
+  refreshGovernanceSnapshotAfterWrite,
+  GOVERNANCE_SNAPSHOT_KEY,
+  GOVERNANCE_SNAPSHOT_MAX_AGE_MS,
+} from '../../packages/core/server/lib/governance/snapshot-store.js';
+import { GOVERNANCE_DOC_KEY } from '../../packages/core/server/lib/governance-store.js';
+import {
+  analyticsSnapshotCoversWindow,
+  analyticsSnapshotKey,
+  analyticsWarmTargets,
+  isAnalyticsSnapshotFresh,
+  readAnalyticsSnapshot,
+  refreshAnalyticsSnapshot,
+  shouldWarmTarget,
+  ANALYTICS_SNAPSHOT_MAX_AGE_MS,
+  ANALYTICS_WARM_BUDGET_MS,
+  ANALYTICS_WARM_RANGES,
+  ANALYTICS_WARM_SOURCES,
+} from '../../packages/core/server/lib/analytics/snapshot-store.js';
+import { PLATFORM_ENV_NAMES } from '../../packages/core/server/lib/site-binding.js';
 import { resetCommitAncestryMemoForTesting } from '../../packages/core/server/lib/production-release.js';
 import type { InventoryRow } from '../../packages/core/server/lib/object-inventory.js';
 import { objectTypes, type ObjectRecord, type Principal } from '../../packages/core/schema/object-record-v1.js';
@@ -788,6 +863,52 @@ const INDEX_WRITER = 'lib/objects/index-doc.ts';
  * anywhere else would put a snapshot in the store that no reader can date.
  */
 const RELEASE_SNAPSHOT_WRITER = 'lib/release/snapshot-store.ts';
+/**
+ * M3.3: the one module allowed to write `snapshots/visual-identity.json`. Like
+ * `objects/index-doc.ts` it is the DOCUMENT layer, not the rebuild:
+ * `visual-identity/snapshot-store.ts` reaches the blob only through the
+ * helpers exported here, which is what lets the record-write choke point amend
+ * the snapshot without importing four `store.list()` calls into `admin-users`'
+ * cold start. INTEGRATE: the separate `snapshots/visual-identity.version`
+ * alarm blob this milestone shipped is gone — the alarm is inside the document
+ * now, on `snapshots/guarded-doc.ts`, so there is one key here, not two.
+ */
+const VISUAL_IDENTITY_SNAPSHOT_WRITER = 'lib/visual-identity/snapshot-doc.ts';
+
+/**
+ * M3.1: the one module allowed to write `snapshots/chats.json`. Every chat
+ * document write goes through `agent/chat-store.ts`'s `saveChatDoc`, which
+ * arms and commits through this module; the transcript-sweep REBUILD is in
+ * `chat-store.ts` and calls `writeRebuiltChatSnapshot` here rather than
+ * writing the key, which is what keeps this scan meaningful.
+ */
+const CHAT_SNAPSHOT_WRITER = 'lib/agent/chat-snapshot-store.ts';
+/**
+ * M3.2: the one module allowed to write `snapshots/members.json`. Three record
+ * writers amend it — `membership/write.ts`'s `saveMember` and
+ * `stampOnboarding`, and `membership/offboarding.ts`'s `scrubPerson` — and
+ * `membership/read.ts` rebuilds it after a sweep; all four go through here.
+ */
+const MEMBERS_SNAPSHOT_WRITER = 'lib/membership/snapshot-store.ts';
+/**
+ * M3.4: the one module allowed to write `snapshots/governance.json`. Two
+ * writers of two halves is exactly the shape that breaks a blob — the
+ * governance write paths know the document and not the probe, the five-minute
+ * `functions/governance-probe-refresh.ts` knows the probe and not the
+ * document — so neither writes a half: both call this module, which always
+ * writes a whole snapshot and carries the half its caller did not bring.
+ */
+const GOVERNANCE_SNAPSHOT_WRITER = 'lib/governance/snapshot-store.ts';
+/**
+ * M4: the one module allowed to write `snapshots/analytics/<source>/<range>.json`.
+ * Two callers — `functions/admin-analytics.ts` on a cold read or a background
+ * revalidation, and `functions/analytics-snapshot-warm.ts` hourly — and both
+ * go through `refreshAnalyticsSnapshot`. A `.setJSON` against the key helper
+ * anywhere else would put a feed in the store that no reader can date, which
+ * is the one thing stale-while-revalidate cannot tolerate: serving stale data
+ * is fine, serving data of unknown age is not.
+ */
+const ANALYTICS_SNAPSHOT_WRITER = 'lib/analytics/snapshot-store.ts';
 
 const walkTs = (dir: string, out: string[] = []): string[] => {
   for (const name of readdirSync(dir)) {
@@ -843,6 +964,11 @@ const KEY_HELPERS: Array<{ token: string; owner: string }> = [
   { token: 'OBJECT_INDEX_KEY', owner: INDEX_WRITER },
   { token: 'OBJECT_VERSION_KEY', owner: INDEX_WRITER },
   { token: 'RELEASE_SNAPSHOT_KEY', owner: RELEASE_SNAPSHOT_WRITER },
+  { token: 'CHAT_SNAPSHOT_KEY', owner: CHAT_SNAPSHOT_WRITER },
+  { token: 'MEMBERS_SNAPSHOT_KEY', owner: MEMBERS_SNAPSHOT_WRITER },
+  { token: 'VISUAL_IDENTITY_SNAPSHOT_KEY', owner: VISUAL_IDENTITY_SNAPSHOT_WRITER },
+  { token: 'GOVERNANCE_SNAPSHOT_KEY', owner: GOVERNANCE_SNAPSHOT_WRITER },
+  { token: 'analyticsSnapshotKey', owner: ANALYTICS_SNAPSHOT_WRITER },
 ];
 
 const BARE_IDENTIFIER = /^[a-z][A-Za-z0-9_]*$/;
@@ -900,6 +1026,24 @@ test('WRITER PINNING: only the choke point writes a record key, a status marker 
   assert.deepEqual(violations, [], `site-objects record writes outside the choke point:\n${violations.join('\n')}`);
 });
 
+test('every pinned key has a real owner module, and that module really writes', () => {
+  // A `KEY_HELPERS` entry naming a file that does not exist, or one that names
+  // the key and never writes anything, pins nothing while reading green. The
+  // check is deliberately two-part rather than "writes THIS token": the choke
+  // point spells `const key = objectRecordKey(…)` and writes `key`, which is
+  // the very shape rule 2 exists to police inside that one file.
+  for (const { token, owner } of KEY_HELPERS) {
+    const file = join(SERVER_ROOT, ...owner.split('/'));
+    assert.ok(existsSync(file), `${owner} (owner of ${token}) is not in the scanned tree`);
+    const source = stripComments(readFileSync(file, 'utf8'));
+    assert.ok(source.includes(token), `${owner} is pinned as the writer of ${token} but never names it`);
+    assert.ok(
+      storeWrites(source).some(isStoreWrite),
+      `${owner} is pinned as a writer but makes no store write at all`
+    );
+  }
+});
+
 test('the writer-pinning scan actually fires — the shapes every migrated call site had', () => {
   // Proof that the rules above are not vacuous. Each of these is a real line
   // this wave removed, and each must be rejected by the same scanner that
@@ -910,6 +1054,11 @@ test('the writer-pinning scan actually fires — the shapes every migrated call 
     "await store.setJSON(OBJECT_INDEX_KEY, index);",
     "await store.setJSON(OBJECT_VERSION_KEY, stamp);",
     'await store.setJSON(RELEASE_SNAPSHOT_KEY, snapshot);',
+    'await store.setJSON(CHAT_SNAPSHOT_KEY, doc, guard);',
+    'await store.setJSON(MEMBERS_SNAPSHOT_KEY, doc);',
+    'await store.setJSON(VISUAL_IDENTITY_SNAPSHOT_KEY, snapshot);',
+    'await store.setJSON(GOVERNANCE_SNAPSHOT_KEY, snapshot);',
+    'await store.setJSON(analyticsSnapshotKey(source, range), snapshot);',
   ];
   for (const shape of shapes) {
     const writes = storeWrites(stripComments(shape));
@@ -1171,4 +1320,1028 @@ test('M1: the GitHub ancestry fan-out is bounded — at most four in flight, and
     process.env.NETLIFY_SITE_ID = previousEnv.site ?? '';
     process.env.NETLIFY_AUTH_TOKEN = previousEnv.auth ?? '';
   }
+});
+
+// ═══ M3.1: the chat list ══════════════════════════════════════════════════
+
+/**
+ * `snapshots/chats.json` is in the `agent-chats` store, not this one, but it
+ * is the same mechanism and the same law, so it is pinned and measured in the
+ * same file (see the header). The acceptance is a COUNT: the Agents hub cost
+ * one `list()` plus one `get()` per chat — each `get` pulling a whole
+ * transcript — and must now cost one blob read.
+ */
+const chatDoc = (chatId: string, over: Partial<ChatDoc> = {}): ChatDoc => ({
+  schema_version: 'agent-chat.v1',
+  chat_id: chatId,
+  kind: 'free',
+  title: `Chat ${chatId}`,
+  created_by: 'editor@example.com',
+  created_at: '2026-09-01T00:00:00.000Z',
+  updated_at: '2026-09-01T00:00:00.000Z',
+  status: 'idle',
+  seq: 0,
+  events: [],
+  runs: [],
+  ...over,
+});
+
+/** A transcript heavy enough that reading one to list a title is the defect. */
+const withTranscript = (doc: ChatDoc, events: number): ChatDoc => ({
+  ...doc,
+  seq: events,
+  events: Array.from({ length: events }, (_, index) => ({
+    seq: index + 1,
+    at: '2026-09-01T00:00:00.000Z',
+    type: 'assistant_text' as const,
+    detail: { text: 'x'.repeat(200) },
+  })),
+});
+
+const chatStoreWith = (etagMode: 'real' | 'none' = 'real') => {
+  const fake = countingStore(etagMode);
+  return { ...fake, chats: fake.store as unknown as AgentChatStore };
+};
+
+test('M3.1: a cold Agents hub sweeps once, writes the list, and is ONE blob read thereafter', async () => {
+  const { chats, put, counts, reset } = chatStoreWith();
+  for (const id of ['chat_a', 'chat_b', 'chat_c']) {
+    put(chatDocKey(id), withTranscript(chatDoc(id), 40));
+  }
+
+  reset();
+  const cold = await readChatList(chats, NOW);
+  assert.equal(cold.rebuilt, true, 'a cold store rebuilds from the transcripts');
+  assert.deepEqual(
+    cold.rows.map((row) => row.chat_id),
+    ['chat_a', 'chat_b', 'chat_c']
+  );
+  assert.ok(counts.list >= 1, 'the rebuild is the only thing allowed to list');
+  assert.ok(counts.get >= 4, `the rebuild reads every transcript (saw ${counts.get})`);
+  assert.ok(counts.set >= 1, 'the rebuild writes back what it built');
+
+  reset();
+  const warm = await readChatList(chats, NOW);
+  assert.equal(warm.rebuilt, false);
+  assert.equal(counts.list, 0, 'a warm list never lists');
+  assert.equal(counts.get, 1, `a warm list is ONE blob read (saw ${counts.get})`);
+  assert.equal(counts.set, 0);
+  assert.deepEqual(warm.rows, cold.rows, 'the two paths answer the same rows');
+});
+
+test('M3.1: a chat write amends the list; an immaterial save touches only the document', async () => {
+  const { chats, put, counts, reset } = chatStoreWith();
+  put(chatDocKey('chat_a'), chatDoc('chat_a'));
+  await readChatList(chats, NOW);
+
+  // A brand-new chat: arm, document, commit — and no listing at all.
+  reset();
+  await saveChatDoc(chats, chatDoc('chat_b', { updated_at: '2026-09-02T00:00:00.000Z' }));
+  assert.equal(counts.list, 0, 'a chat write never sweeps');
+  assert.equal(counts.set, 3, `arm + document + commit (saw ${counts.set})`);
+  reset();
+  const listed = await readChatList(chats, NOW);
+  assert.equal(listed.rebuilt, false, 'the amendment left the list trusted');
+  assert.deepEqual(
+    listed.rows.map((row) => row.chat_id),
+    ['chat_b', 'chat_a'],
+    'newest first'
+  );
+
+  // The run loop's shape: `updated_at` creeps, nothing else moves. One write.
+  reset();
+  await saveChatDoc(chats, chatDoc('chat_b', { updated_at: '2026-09-02T00:00:05.000Z' }));
+  assert.equal(counts.set, 1, `an immaterial save writes the document only (saw ${counts.set})`);
+  assert.equal((await readChatList(chats, NOW)).rebuilt, false, 'and leaves the list trusted');
+
+  // A status transition is always material — this is the badge the hub draws.
+  reset();
+  await saveChatDoc(chats, chatDoc('chat_b', { updated_at: '2026-09-02T00:00:06.000Z', status: 'running' }));
+  assert.equal(counts.set, 3, 'a status transition is amended at once');
+  assert.equal((await readChatList(chats, NOW)).rows[0]?.status, 'running');
+
+  // …and so is a touch past the tolerance, so "last active" cannot drift.
+  reset();
+  const later = new Date(Date.parse('2026-09-02T00:00:06.000Z') + CHAT_ROW_TOUCH_TOLERANCE_MS + 1).toISOString();
+  await saveChatDoc(chats, chatDoc('chat_b', { updated_at: later, status: 'running' }));
+  assert.equal(counts.set, 3, 'a touch past the tolerance is amended');
+  assert.equal((await readChatList(chats, NOW)).rows[0]?.updated_at, later);
+});
+
+test('M3.1: the materiality rule is pure, and never skips something the hub renders', () => {
+  const base = chatSnapshotRow(chatDoc('chat_a'));
+  assert.equal(chatRowNeedsCommit(undefined, base), true, 'an unlisted chat is always material');
+  assert.equal(chatRowNeedsCommit(base, base), false);
+  assert.equal(chatRowNeedsCommit(base, { ...base, status: 'queued' }), true);
+  assert.equal(chatRowNeedsCommit(base, { ...base, title: 'Renamed' }), true);
+  assert.equal(chatRowNeedsCommit(base, { ...base, object_id: 'page_home' }), true);
+  assert.equal(
+    chatRowNeedsCommit(base, {
+      ...base,
+      last_outcome: { run_id: 'r1', started_at: 'a', finished_at: 'b', outcome: 'completed', chips: [] },
+    }),
+    true,
+    'a finished run always lands'
+  );
+  const nudged = new Date(Date.parse(base.updated_at) + 5_000).toISOString();
+  assert.equal(chatRowNeedsCommit(base, { ...base, updated_at: nudged }), false);
+  const past = new Date(Date.parse(base.updated_at) + CHAT_ROW_TOUCH_TOLERANCE_MS).toISOString();
+  assert.equal(chatRowNeedsCommit(base, { ...base, updated_at: past }), true);
+  assert.equal(chatRowNeedsCommit(base, { ...base, updated_at: 'not-a-date' }), true, 'an unparseable stamp never skips');
+});
+
+test('M3.1: an interrupted amendment leaves the list armed, and the next read repairs it', async () => {
+  const { chats, put, blobs, reset, counts } = chatStoreWith();
+  put(chatDocKey('chat_a'), chatDoc('chat_a'));
+  await readChatList(chats, NOW);
+
+  // The crash window: armed, the document written, and the process gone before
+  // the commit. Exactly what `saveChatDoc` does, minus its last line.
+  const doc = chatDoc('chat_b', { updated_at: '2026-09-03T00:00:00.000Z' });
+  const lease = await armChatSnapshotRow(chats, doc, NOW);
+  assert.equal(lease.armed, true);
+  put(chatDocKey('chat_b'), doc);
+
+  assert.equal(await readChatSnapshot(chats), undefined, 'an armed list is never served');
+  reset();
+  const repaired = await readChatList(chats, NOW);
+  assert.equal(repaired.rebuilt, true, 'the armed flag forces the sweep');
+  assert.ok(counts.list >= 1);
+  assert.deepEqual(
+    repaired.rows.map((row) => row.chat_id),
+    ['chat_b', 'chat_a'],
+    'and the row the interrupted write never committed is there'
+  );
+  assert.ok(blobs.has(CHAT_SNAPSHOT_KEY));
+  assert.equal((await readChatList(chats, NOW)).rebuilt, false, 'the repair put the alarm down');
+});
+
+test('M3.1: an amendment never CREATES the list — the defect that would publish one chat as forty', async () => {
+  // The shape this guards: a tenant with chats already in the store, deployed
+  // onto a build that has a snapshot and has never written one. If the first
+  // `saveChatDoc` were allowed to create the document, it would create it with
+  // exactly one row and the hub would trust it.
+  const { chats, put, blobs } = chatStoreWith();
+  for (const id of ['chat_a', 'chat_b', 'chat_c']) put(chatDocKey(id), chatDoc(id));
+  assert.equal(blobs.has(CHAT_SNAPSHOT_KEY), false, 'no snapshot has ever been written here');
+
+  await saveChatDoc(chats, chatDoc('chat_d', { updated_at: '2026-09-07T00:00:00.000Z' }));
+  assert.equal(await readChatSnapshot(chats), undefined, 'what the amendment left is armed, not a list');
+
+  const listed = await readChatList(chats, NOW);
+  assert.equal(listed.rebuilt, true, 'the read rebuilds from the transcripts instead');
+  assert.deepEqual(
+    listed.rows.map((row) => row.chat_id).sort(),
+    ['chat_a', 'chat_b', 'chat_c', 'chat_d'],
+    'and answers every chat, not only the one that was written'
+  );
+});
+
+test('M3.1: a superseded or unparseable list is rebuilt, never served', async () => {
+  const { chats, put } = chatStoreWith();
+  put(chatDocKey('chat_a'), chatDoc('chat_a'));
+
+  put(CHAT_SNAPSHOT_KEY, { schema_version: 'chat-list-snapshot.v0', as_of: 'x', seq: 3, chats: [] });
+  assert.equal(await readChatSnapshot(chats), undefined, 'a version this build does not read is not a list');
+  assert.equal((await readChatList(chats, NOW)).rebuilt, true);
+  assert.equal((await readChatList(chats, NOW)).rebuilt, false);
+});
+
+test('M3.1: a store that cannot prove a conditional write is slow, never wrong', async () => {
+  // The local file-backed shim's degradation: no etag, so no arm, so no
+  // amendment ever commits — and every list falls back to the sweep. What must
+  // NOT happen is a list that is missing a chat.
+  const { chats, put } = chatStoreWith('none');
+  put(chatDocKey('chat_a'), chatDoc('chat_a'));
+  assert.equal((await readChatList(chats, NOW)).rebuilt, true);
+
+  await saveChatDoc(chats, chatDoc('chat_b', { updated_at: '2026-09-04T00:00:00.000Z' }));
+  const after = await readChatList(chats, NOW);
+  assert.equal(after.rebuilt, true, 'without a CAS token the amendment never lands, so the read repairs');
+  assert.deepEqual(
+    after.rows.map((row) => row.chat_id),
+    ['chat_b', 'chat_a'],
+    'and the answer is still complete'
+  );
+});
+
+test('M3.1: the visibility rule scopes rows exactly as it scoped documents', async () => {
+  const { chats, put } = chatStoreWith();
+  put(chatDocKey('mine'), chatDoc('mine', { created_by: 'Editor@Example.com' }));
+  put(chatDocKey('theirs'), chatDoc('theirs', { created_by: 'owner@example.com' }));
+  const { rows } = await readChatList(chats, NOW);
+
+  assert.deepEqual(
+    visibleChatDocs(rows, 'editor@example.com', false, false).map((row) => row.chat_id),
+    ['mine']
+  );
+  assert.equal(visibleChatDocs(rows, 'editor@example.com', true, false).length, 1, 'include_all needs an Owner');
+  assert.equal(visibleChatDocs(rows, 'editor@example.com', true, true).length, 2);
+});
+
+// ═══ M3.2: the members list ═══════════════════════════════════════════════
+
+const seedMember = (
+  put: (key: string, value: unknown) => void,
+  email: string,
+  over: { role?: 'owner' | 'admin' | 'editor'; status?: 'invited' | 'active' | 'suspended' } = {}
+) => {
+  const member = newMember({
+    email,
+    display_name: email.split('@')[0] ?? email,
+    role: over.role ?? 'admin',
+    status: over.status ?? 'active',
+    source: 'invitation',
+    granted_by: { kind: 'human', email: 'owner@example.com' },
+    invited_by: 'owner@example.com',
+    at: '2026-09-01T00:00:00.000Z',
+  });
+  put(KEYS.person(member.person.person_id), member.person);
+  put(KEYS.membership(member.person.person_id), member.membership);
+  put(KEYS.byEmail(member.person.email), { person_id: member.person.person_id });
+  return member;
+};
+
+const memberStore = (etagMode: 'real' | 'none' = 'real') => {
+  const fake = countingStore(etagMode);
+  return { ...fake, users: fake.store as unknown as MembershipStore };
+};
+
+test('M3.2: the Admins list stops being an N+1 — one sweep, then ONE blob read', async () => {
+  const { users, put, counts, reset } = memberStore();
+  seedMember(put, 'a@example.com');
+  seedMember(put, 'b@example.com', { role: 'owner' });
+  seedMember(put, 'c@example.com', { status: 'invited' });
+
+  reset();
+  const cold = await readMemberList(users, NOW);
+  assert.equal(cold.rebuilt, true);
+  assert.equal(cold.members.length, 3);
+  assert.ok(counts.list >= 2, 'the sweep lists both prefixes');
+  assert.ok(counts.get >= 6, `the sweep reads a membership AND a person per member (saw ${counts.get})`);
+
+  reset();
+  const warm = await readMemberList(users, NOW);
+  assert.equal(warm.rebuilt, false);
+  assert.equal(counts.list, 0, 'a warm Admins list never lists');
+  assert.equal(counts.get, 1, `a warm Admins list is ONE blob read (saw ${counts.get})`);
+  assert.deepEqual(
+    warm.members.map((member) => member.person.email),
+    ['a@example.com', 'b@example.com', 'c@example.com'],
+    'in the sweep order, so no caller can tell the two paths apart'
+  );
+  assert.deepEqual(warm.members, cold.members);
+});
+
+test('M3.2: the v1-shaped view is projected from the snapshot, not stored a second time', async () => {
+  const { users, put } = memberStore();
+  seedMember(put, 'a@example.com');
+  seedMember(put, 'b@example.com', { status: 'suspended' });
+
+  const swept = (await listMembers(users)).map(memberToUserRecord);
+  const listed = await listUserRecords(users);
+  assert.deepEqual(listed, swept, 'the snapshot answers exactly what the sweep answered');
+  // The audit array the row drawer falls back to survives the round trip.
+  assert.ok(Array.isArray(listed[0]?.audit));
+});
+
+test('M3.2: a membership write amends the list; a purge removes the row', async () => {
+  const { users, put, counts, reset } = memberStore();
+  const existing = seedMember(put, 'a@example.com');
+  await readMemberList(users, NOW);
+
+  reset();
+  await saveMember(users, {
+    person: { ...existing.person, email: 'a@example.com', display_name: 'Renamed' },
+    membership: { ...existing.membership, role: 'editor', updated_at: '2026-09-05T00:00:00.000Z' },
+  });
+  assert.equal(counts.list, 0, 'a membership write never sweeps');
+  const afterSave = await readMemberList(users, NOW);
+  assert.equal(afterSave.rebuilt, false, 'the amendment left the list trusted');
+  assert.equal(afterSave.members[0]?.person.display_name, 'Renamed');
+  assert.equal(afterSave.members[0]?.membership.role, 'editor');
+
+  const second = seedMember(put, 'b@example.com');
+  await saveMember(users, second);
+  assert.equal((await readMemberList(users, NOW)).members.length, 2);
+
+  await scrubPerson(users, { person: second.person, membership: second.membership, at: '2026-09-06T00:00:00.000Z' });
+  const afterPurge = await readMemberList(users, NOW);
+  assert.equal(afterPurge.rebuilt, false, 'a purge amends rather than invalidating');
+  assert.deepEqual(
+    afterPurge.members.map((member) => member.person.email),
+    ['a@example.com'],
+    'a scrubbed person leaves the list, exactly as it leaves the sweep'
+  );
+  assert.deepEqual(
+    (await listMembers(users)).map((member) => member.person.email),
+    ['a@example.com'],
+    'and the sweep agrees'
+  );
+});
+
+test('M3.2: an interrupted membership write leaves the list armed, and the next read repairs it', async () => {
+  const { users, put, reset, counts } = memberStore();
+  seedMember(put, 'a@example.com');
+  await readMemberList(users, NOW);
+
+  // Armed, records written, gone before the commit.
+  const lease = await armMembersSnapshot(users, NOW);
+  assert.equal(lease.armed, true);
+  seedMember(put, 'b@example.com');
+
+  assert.equal(await readMembersSnapshot(users), undefined, 'an armed list is never served');
+  reset();
+  const repaired = await readMemberList(users, NOW);
+  assert.equal(repaired.rebuilt, true);
+  assert.ok(counts.list >= 2, 'the repair is the sweep');
+  assert.deepEqual(
+    repaired.members.map((member) => member.person.email),
+    ['a@example.com', 'b@example.com']
+  );
+  assert.equal((await readMemberList(users, NOW)).rebuilt, false, 'the repair put the alarm down');
+});
+
+test('M3.2: an amendment never CREATES the list — the same defect, with people in it', async () => {
+  const { users, put, blobs } = memberStore();
+  seedMember(put, 'a@example.com');
+  seedMember(put, 'b@example.com');
+  assert.equal(blobs.has(MEMBERS_SNAPSHOT_KEY), false);
+
+  const fresh = seedMember(put, 'c@example.com');
+  await saveMember(users, fresh);
+  assert.equal(await readMembersSnapshot(users), undefined, 'what the amendment left is armed, not a list');
+
+  const listed = await readMemberList(users, NOW);
+  assert.equal(listed.rebuilt, true);
+  assert.deepEqual(
+    listed.members.map((member) => member.person.email),
+    ['a@example.com', 'b@example.com', 'c@example.com'],
+    'a workspace of three is not published as a workspace of one'
+  );
+});
+
+test('M3.2: a superseded members list is rebuilt, and the min_owners guard never reads a cache', async () => {
+  const { users, put, counts, reset } = memberStore();
+  seedMember(put, 'a@example.com', { role: 'owner' });
+  seedMember(put, 'b@example.com', { role: 'owner' });
+
+  put(MEMBERS_SNAPSHOT_KEY, { schema_version: 'member-list-snapshot.v0', as_of: 'x', seq: 9, members: [] });
+  assert.equal(await readMembersSnapshot(users), undefined);
+  assert.equal((await readMemberList(users, NOW)).rebuilt, true);
+  assert.equal((await readMemberList(users, NOW)).rebuilt, false);
+
+  // The guard that decides whether a workspace may be left without an owner
+  // reads RECORDS, deliberately — a listing, not the one-blob read above.
+  reset();
+  assert.equal(await countActiveOwners(users), 2);
+  assert.ok(counts.list >= 2, 'countActiveOwners sweeps, on purpose');
+});
+// ═══ M3.3: the visual-identity snapshot ═══════════════════════════════════
+
+/**
+ * `snapshots/visual-identity.json` is the second projection the record-write
+ * choke point maintains, under the same law as the first: armed before the
+ * record moves, committed with a compare-and-swap, trusted only while its
+ * alarm agrees, and repaired by the same code path that builds it.
+ *
+ * The number these cases exist to pin is SEVENTEEN — the `admin-object`
+ * invocations one load of `/admin/settings/visual-identity` used to make (four
+ * `list`s, thirteen `get`s on drluriescience). The server side of that becomes
+ * two blob reads; the cases below assert the two, and assert that nothing
+ * about the object index moved to buy them.
+ */
+const recipeRecord = (
+  id: string,
+  objectType: 'template' | 'section_template' | 'theme' | 'visual_standard',
+  body: Record<string, unknown> = { name: id }
+): ObjectRecord => ({
+  ...pageRecord(id),
+  object_id: id,
+  object_type: objectType,
+  schema_version: `${objectType}.v1`,
+  body,
+});
+
+const seedVisualIdentity = (put: (key: string, value: unknown) => void) => {
+  put('objects/template/by-id/tpl_interior.json', recipeRecord('tpl_interior', 'template', { name: 'Interior page', slots: [] }));
+  put('objects/template/by-id/tpl_landing.json', recipeRecord('tpl_landing', 'template', { name: 'Landing', slots: [] }));
+  put('objects/section_template/by-id/stpl_hero.json', recipeRecord('stpl_hero', 'section_template'));
+  put('objects/theme/by-id/thm_default.json', recipeRecord('thm_default', 'theme', { name: 'Default', tokens: { colors: { ink: '#111' } } }));
+  put('objects/visual_standard/by-id/vis_house.json', recipeRecord('vis_house', 'visual_standard', { kind: 'house', label: 'House' }));
+  // Noise: a type the snapshot must never hold, and which must never cost it a
+  // single blob operation on write.
+  put('objects/page/by-id/page_a.json', pageRecord('page_a'));
+};
+
+const visualIdentityStore = (store: ObjectVerbStore) => store as unknown as VisualIdentitySnapshotStore;
+
+test('M3.3 ACCEPTANCE: a warm visual-identity read is TWO blob reads and no listing — the seventeen calls are gone', async () => {
+  const { store, counts, put, reset } = countingStore();
+  seedVisualIdentity(put);
+
+  // Cold: the read repairs itself. Four listings, n record reads, and the two
+  // docs written — the same work the client used to drive over seventeen calls,
+  // paid once, on the server, and never again.
+  const cold = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal(cold.stats.trusted, false);
+  assert.equal(cold.stats.listed, 5, 'four listings name exactly the five records of the four types');
+  assert.equal(cold.stats.wrote, true, 'a read that had to rebuild writes what it rebuilt — this is the repair');
+  assert.equal(counts.list, VISUAL_IDENTITY_OBJECT_TYPES.length);
+
+  reset();
+  const warm = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+
+  // THE measurement, after the alarm moved inside the document: one blob.
+  assert.equal(counts.get, 1, 'a warm visual-identity read is exactly ONE blob read');
+  assert.equal(counts.list, 0, 'no listing may happen on the warm read path');
+  assert.equal(counts.set, 0, 'a read may not write');
+  assert.equal(warm.stats.trusted, true);
+  assert.equal(warm.stats.read, 0);
+
+  // …and it is the same answer, grouped the way the page consumes it.
+  const byType = Object.fromEntries(
+    VISUAL_IDENTITY_OBJECT_TYPES.map((type) => [type, warm.entries.filter((entry) => entry.object_type === type).length])
+  );
+  assert.deepEqual(byType, { template: 2, section_template: 1, theme: 1, visual_standard: 1 });
+  assert.ok(
+    warm.entries.every((entry) => entry.object_type !== ('page' as unknown)),
+    'the snapshot holds the four types and nothing else'
+  );
+});
+
+test('M3.3: the choke point amends the snapshot in the same sequence — and a type it does not hold costs it nothing', async () => {
+  const { store, counts, put, blobs, reset } = countingStore();
+  seedVisualIdentity(put);
+  await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  await inventory(store);
+
+  // A write of one of the four types.
+  reset();
+  const written = await putObjectRecord(store, {
+    record: recipeRecord('thm_default', 'theme', { name: 'Default, edited', tokens: { colors: { ink: '#222' } } }),
+    nowMs: NOW,
+  });
+  assert.equal(written.index_committed, true, 'the object index still commits exactly as it did before M3.3');
+  assert.equal(written.snapshot_committed, true, 'and the body snapshot commits in the same sequence');
+  assert.equal(counts.list, 0, 'a write never lists');
+
+  // The amended blob is current AND trusted: the next page load reads one blob.
+  reset();
+  const after = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal(after.stats.trusted, true, 'an amended snapshot is trusted without a rebuild');
+  assert.equal(counts.list, 0);
+  const theme = after.entries.find((entry) => entry.object_id === 'thm_default');
+  assert.equal((theme?.record.body as { name?: string } | undefined)?.name, 'Default, edited');
+
+  // A type the snapshot does not hold: the object index still moves, and the
+  // snapshot blob is not touched at all — not read, not written.
+  const before = { snapshot: blobs.get(VISUAL_IDENTITY_SNAPSHOT_KEY)?.etag };
+  reset();
+  const unrelated = await putObjectRecord(store, { record: pageRecord('page_a', 2), nowMs: NOW });
+  assert.equal(unrelated.index_committed, true);
+  assert.equal(unrelated.snapshot_committed, false, 'nothing was owed');
+  assert.equal(blobs.get(VISUAL_IDENTITY_SNAPSHOT_KEY)?.etag, before.snapshot, 'the snapshot blob is untouched');
+  assert.equal(
+    (await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW })).stats.trusted,
+    true,
+    'an unrelated object write must never invalidate the visual-identity snapshot'
+  );
+});
+
+test('M3.3: a purge through the choke point drops the entry; a retire keeps it and moves its status', async () => {
+  const { store, put } = countingStore();
+  seedVisualIdentity(put);
+  await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+
+  await retireObjectRecord(store, {
+    record: { ...recipeRecord('tpl_landing', 'template'), status: 'archived' } as ObjectRecord,
+    nowMs: NOW,
+  });
+  const retired = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal(retired.stats.trusted, true);
+  assert.equal(retired.entries.find((entry) => entry.object_id === 'tpl_landing')?.status, 'archived');
+
+  const deleted = await deleteObjectRecord(store, { object_type: 'template', object_id: 'tpl_landing' }, { nowMs: NOW });
+  assert.equal(deleted.snapshot_committed, true);
+  const purged = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal(purged.stats.trusted, true, 'a purge leaves the pair in step, not armed');
+  assert.equal(purged.entries.some((entry) => entry.object_id === 'tpl_landing'), false);
+});
+
+test('M3.3 REPAIR: missing, unparseable, wrong-schema and interrupted all fall through to the per-object reads', async () => {
+  const { store, put, blobs } = countingStore();
+  seedVisualIdentity(put);
+
+  // Missing.
+  assert.equal((await readVisualIdentitySnapshotDoc(visualIdentityStore(store))).doc, undefined);
+  await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal((await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW })).stats.trusted, true);
+
+  // Unparseable.
+  put(VISUAL_IDENTITY_SNAPSHOT_KEY, 'not json at all');
+  const fromGarbage = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal(fromGarbage.stats.superseded, true, 'a blob that was there and could not be used is a REBUILD, not a cold store');
+  assert.equal(fromGarbage.entries.length, 5);
+  assert.equal((await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW })).stats.trusted, true);
+
+  // Wrong schema — detected on the first read after deploy and rebuilt in
+  // place, exactly as `objects/index.json`'s version bump is. No migration.
+  const stored = JSON.parse(blobs.get(VISUAL_IDENTITY_SNAPSHOT_KEY)?.value ?? 'null') as Record<string, unknown>;
+  put(VISUAL_IDENTITY_SNAPSHOT_KEY, { ...stored, schema_version: 'visual-identity-snapshot.v0' });
+  assert.equal((await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW })).stats.superseded, true);
+  assert.equal((await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW })).stats.trusted, true);
+
+  // Interrupted: the alarm is up inside the document — the shape a crash
+  // between the record write and the snapshot commit leaves behind. Armed is
+  // untrusted whatever the rows say, so nothing is served from it.
+  const armed = JSON.parse(blobs.get(VISUAL_IDENTITY_SNAPSHOT_KEY)?.value ?? 'null') as Record<string, unknown>;
+  put(VISUAL_IDENTITY_SNAPSHOT_KEY, { ...armed, armed: true });
+  put('objects/theme/by-id/thm_late.json', recipeRecord('thm_late', 'theme'));
+  const repaired = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal(repaired.stats.trusted, false);
+  assert.equal(repaired.entries.some((entry) => entry.object_id === 'thm_late'), true, 'the repair finds the record the snapshot never heard about');
+  assert.equal((await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW })).stats.trusted, true);
+
+  // Sticky: an armed flag is not cleared by a writer, only by the rebuild.
+  const inStep = JSON.parse(blobs.get(VISUAL_IDENTITY_SNAPSHOT_KEY)?.value ?? 'null') as Record<string, unknown>;
+  put(VISUAL_IDENTITY_SNAPSHOT_KEY, { ...inStep, armed: true });
+  await putObjectRecord(store, { record: recipeRecord('thm_default', 'theme', { name: 'Edited under an armed alarm' }), nowMs: NOW });
+  assert.equal(
+    (await readVisualIdentitySnapshotDoc(visualIdentityStore(store))).doc?.armed,
+    true,
+    'a writer that finds the alarm armed retreats and leaves it armed'
+  );
+  const clearing = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal(clearing.stats.trusted, false, 'the read that finds the flag rebuilds rather than serving');
+  assert.equal(
+    (await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW })).stats.trusted,
+    true,
+    'and only that full rebuild puts the flag down'
+  );
+});
+
+test('M3.3: a store that cannot report an etag never commits and always rebuilds — the documented degradation', async () => {
+  const { store, put } = countingStore('none');
+  seedVisualIdentity(put);
+
+  await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  const written = await putObjectRecord(store, { record: recipeRecord('thm_default', 'theme'), nowMs: NOW });
+  assert.equal(written.snapshot_committed, false, 'no compare-and-swap token, no commit');
+  const read = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  assert.equal(read.stats.trusted, false, 'so every read rebuilds — correct, and slow, exactly as before M3.3');
+  assert.equal(read.entries.length, 5, 'and the answer is still right');
+});
+
+/**
+ * SIZE. This snapshot holds BODIES, not the fifteen-scalar rows
+ * `objects/index.json` holds, so the one way it degrades quietly is by getting
+ * fat: a large blob on a page path is just a slower page.
+ *
+ * Two things keep it honest and both are asserted here. The ledger is dropped
+ * (a template patched fifty times carries fifty history entries, and a patch
+ * entry's `details.capture` can hold a whole section blueprint — that is edit
+ * COUNT, not content, and no consumer on this surface reads it), and the size
+ * is reported on every read as `stats.bytes` so it is a number somebody can
+ * watch rather than a page that quietly slows down.
+ *
+ * Measured against the committed exports (drlurie 13 records → 21.1 KB,
+ * platform 15 → 23.7 KB, zilberman 15 → 23.3 KB; ~210-240 KB at ten times
+ * that). Without the ledger drop the same eleven drlurie records with a
+ * forty-entry history each are 133 KB against 21.6 KB — and that difference is
+ * a function of EDIT COUNT, not content, so it has no bound. See
+ * `visual-identity/snapshot-store.ts`'s SIZE note for the split to make if it
+ * ever stops fitting in one blob.
+ */
+test('M3.3 SIZE: the unbounded history ledger never reaches the blob, and the size is reported', async () => {
+  const { store, put } = countingStore();
+  const fat = recipeRecord('tpl_fat', 'template', { name: 'Fat', slots: [] });
+  put('objects/template/by-id/tpl_fat.json', {
+    ...fat,
+    history: Array.from({ length: 200 }, () => ({
+      at: '2026-08-01T00:00:00.000Z',
+      action: 'patch',
+      actor: HUMAN,
+      details: { op: 'upsert_slot', capture: { blueprint: 'x'.repeat(400) } },
+    })),
+  });
+
+  const read = await readVisualIdentitySnapshot(visualIdentityStore(store), { nowMs: NOW });
+  const entry = read.entries[0];
+  assert.deepEqual(entry?.record.history, [], 'the ledger is dropped');
+  assert.equal(entry?.record.history_length, 200, 'and its length is kept, so nothing is silently pretended');
+  assert.ok(read.stats.bytes > 0, 'the blob size is reported on every read');
+  assert.ok(
+    read.stats.bytes < 10_000,
+    `one record whose ledger is 80 KB must not make an 80 KB snapshot (saw ${read.stats.bytes} bytes)`
+  );
+});
+
+// ═══ M3.4: the governance snapshot ════════════════════════════════════════
+
+/**
+ * `snapshots/governance.json` lives under the same law as the two before it,
+ * and its cost is stated against the same baseline: a warm governance read is
+ * ONE blob read and nothing else — no `overrides.v1`, and (the point of the
+ * milestone) no CMS-Agent probe.
+ *
+ * The fake store below counts reads, and the fake `fetch` is not decoration:
+ * the defect M3.4 removes is a 2768 ms cross-service call on a page path, and
+ * the only way a test can pin its absence is to make any outbound call an
+ * explicit failure.
+ */
+type SnapshotBlobStore = {
+  get(key: string): Promise<string | null>;
+  setJSON(key: string, value: unknown): Promise<void>;
+  reads: string[];
+  writes: string[];
+  blobs: Map<string, string>;
+};
+
+const snapshotBlobStore = (seed: Record<string, unknown> = {}): SnapshotBlobStore => {
+  const blobs = new Map<string, string>(Object.entries(seed).map(([key, value]) => [key, JSON.stringify(value)]));
+  return {
+    blobs,
+    reads: [],
+    writes: [],
+    async get(key: string) {
+      (this as SnapshotBlobStore).reads.push(key);
+      return blobs.get(key) ?? null;
+    },
+    async setJSON(key: string, value: unknown) {
+      (this as SnapshotBlobStore).writes.push(key);
+      blobs.set(key, JSON.stringify(value));
+    },
+  };
+};
+
+const withNoOutboundCall = async (run: () => Promise<void>): Promise<void> => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('a page path must make no outbound call');
+  }) as typeof fetch;
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+};
+
+test('M3.4: a warm governance read is ONE blob read, and never probes', async () => {
+  await withNoOutboundCall(async () => {
+    const nowMs = Date.parse('2026-09-16T12:00:00.000Z');
+    const store = snapshotBlobStore({
+      [GOVERNANCE_SNAPSHOT_KEY]: buildGovernanceSnapshot({
+        doc: null,
+        probe: {
+          checked_at: new Date(nowMs - 60_000).toISOString(),
+          reachable: true,
+          latency_ms: 240,
+          agent_ref: 'agt_client_manager@2',
+          code: null,
+          message: null,
+        },
+        nowMs: nowMs - 60_000,
+        source: 'probe_schedule',
+      }),
+    });
+
+    const { snapshot, repaired } = await loadGovernanceSnapshot(
+      store as unknown as Parameters<typeof loadGovernanceSnapshot>[0],
+      nowMs
+    );
+    assert.equal(repaired, false);
+    assert.deepEqual(store.reads, [GOVERNANCE_SNAPSHOT_KEY], 'exactly one blob read, and not overrides.v1');
+    assert.deepEqual(store.writes, [], 'a warm read writes nothing');
+
+    const view = cmsAgentProbeView(snapshot.cms_agent_probe, nowMs);
+    assert.equal(view.state, 'fresh');
+    assert.equal(cmsAgentHealthFromProbe(snapshot.cms_agent_probe)?.ok, true);
+  });
+});
+
+test('M3.4: the repair is the OLD read path — it reads overrides.v1, writes back, and does not probe', async () => {
+  await withNoOutboundCall(async () => {
+    const nowMs = Date.parse('2026-09-16T12:00:00.000Z');
+    const store = snapshotBlobStore({
+      [GOVERNANCE_DOC_KEY]: { schema_version: 'overrides.v1', updated_by: 'wolf@example.com', updated_at: 'x', history: [], learning_mode: true },
+    });
+
+    const { snapshot, repaired } = await loadGovernanceSnapshot(
+      store as unknown as Parameters<typeof loadGovernanceSnapshot>[0],
+      nowMs
+    );
+    assert.equal(repaired, true);
+    assert.deepEqual(store.reads, [GOVERNANCE_SNAPSHOT_KEY, GOVERNANCE_DOC_KEY], 'a miss costs the old read, once');
+    assert.deepEqual(store.writes, [GOVERNANCE_SNAPSHOT_KEY], 'the repair writes back what it built');
+    assert.equal(snapshot.source, 'repair');
+    assert.equal(snapshot.doc?.learning_mode, true, 'the document half is repaired from the store');
+
+    /**
+     * THE DECISION: what a page shows when there has never been a probe.
+     *
+     * `never_checked`, not "unreachable". The schedule has not run on this
+     * tenant; we did not ask, so we do not answer. A synthesized red would be
+     * a claim about CMS-Agent made on the strength of our own cron, and it is
+     * indistinguishable on screen from a real outage.
+     */
+    assert.equal(snapshot.cms_agent_probe, null);
+    assert.deepEqual(cmsAgentProbeView(snapshot.cms_agent_probe, nowMs), { state: 'never_checked' });
+    assert.equal(cmsAgentHealthFromProbe(snapshot.cms_agent_probe), undefined, 'no verdict is rendered at all');
+  });
+});
+
+test('M3.4: a stale snapshot is repaired WITH its last probe — an old reading is dated, never discarded or re-taken', async () => {
+  await withNoOutboundCall(async () => {
+    const nowMs = Date.parse('2026-09-16T12:00:00.000Z');
+    const checkedAt = new Date(nowMs - 3 * 60 * 60_000).toISOString();
+    const store = snapshotBlobStore({
+      [GOVERNANCE_SNAPSHOT_KEY]: buildGovernanceSnapshot({
+        doc: null,
+        probe: { checked_at: checkedAt, reachable: true, latency_ms: 190, agent_ref: 'agt_x', code: null, message: null },
+        nowMs: nowMs - GOVERNANCE_SNAPSHOT_MAX_AGE_MS - 60_000,
+        source: 'probe_schedule',
+      }),
+    });
+
+    const { snapshot, repaired } = await loadGovernanceSnapshot(
+      store as unknown as Parameters<typeof loadGovernanceSnapshot>[0],
+      nowMs
+    );
+    assert.equal(repaired, true, 'past the bound the document half is rebuilt');
+    assert.equal(snapshot.cms_agent_probe?.checked_at, checkedAt, 'the probe is carried, not re-taken');
+
+    const view = cmsAgentProbeView(snapshot.cms_agent_probe, nowMs);
+    assert.equal(view.state, 'stale', 'three hours old renders as "last checked hh:mm", not as a live verdict');
+    assert.equal(view.state === 'stale' ? view.checked_at : '', checkedAt, 'the bound is stated by stating the time');
+  });
+});
+
+test('M3.4: a governance write carries the probe forward, so saving a guardrail never blanks the bridge status', async () => {
+  await withNoOutboundCall(async () => {
+    const nowMs = Date.parse('2026-09-16T12:00:00.000Z');
+    const probe = {
+      checked_at: new Date(nowMs - 120_000).toISOString(),
+      reachable: false,
+      latency_ms: 3000,
+      agent_ref: null,
+      code: 'cms_agent_timeout',
+      message: 'timed out',
+    };
+    const store = snapshotBlobStore({
+      [GOVERNANCE_SNAPSHOT_KEY]: buildGovernanceSnapshot({ doc: null, probe, nowMs: nowMs - 120_000, source: 'probe_schedule' }),
+    });
+
+    const nextDoc = {
+      schema_version: 'overrides.v1' as const,
+      updated_by: 'wolf@example.com',
+      updated_at: new Date(nowMs).toISOString(),
+      history: [],
+      brandImageryOverrides: 'lock' as const,
+    };
+    await refreshGovernanceSnapshotAfterWrite(
+      store as unknown as Parameters<typeof refreshGovernanceSnapshotAfterWrite>[0],
+      nextDoc,
+      nowMs
+    );
+
+    const written = await readGovernanceSnapshot(store as unknown as Parameters<typeof readGovernanceSnapshot>[0]);
+    assert.equal(written?.source, 'governance_write');
+    assert.equal(written?.doc?.brandImageryOverrides, 'lock', "the Owner reads their own change back");
+    assert.deepEqual(written?.cms_agent_probe, probe, 'a policy write says nothing about CMS-Agent and must claim nothing');
+  });
+});
+
+// ═══ M4: the analytics snapshots ══════════════════════════════════════════
+
+/**
+ * `snapshots/analytics/<source>/<range>.json`, and the rule that makes it
+ * worth having: SERVE THE BLOB, THEN REFRESH. The measured defect is 2151 ms
+ * of Netlify Analytics on the page path per view; the acceptance is that a
+ * read with a blob present costs one blob read and makes no upstream call
+ * whatever the blob's age.
+ *
+ * `NETLIFY_ANALYTICS_*` is left unconfigured in these cases on purpose: the
+ * builder then produces its catalogued `analytics_lookup_unconfigured` body
+ * without calling anything, which lets the SWR mechanics be pinned without a
+ * network stub pretending to be Netlify.
+ */
+test('M4: the key is one blob per (source, range) — never per window', () => {
+  assert.equal(analyticsSnapshotKey('netlify', '30d'), 'snapshots/analytics/netlify/30d.json');
+  assert.equal(analyticsSnapshotKey('own', '7d'), 'snapshots/analytics/own/7d.json');
+  // The window slides with the clock; keying on it is the defect M4 removes
+  // (every mount minted a key nothing had written). A range is a choice.
+  assert.equal(analyticsSnapshotKey('netlify', '30d'), analyticsSnapshotKey('netlify', '30d'));
+});
+
+test('M4: a warm read serves the blob and makes no upstream call', async () => {
+  await withNoOutboundCall(async () => {
+    const nowMs = Date.now();
+    const store = snapshotBlobStore({
+      'snapshots/analytics/netlify/30d.json': {
+        schema_version: 'analytics-snapshot.v1',
+        as_of: new Date(nowMs - 60_000).toISOString(),
+        source: 'netlify',
+        range: '30d',
+        window: { from: nowMs - 30 * 86_400_000, to: nowMs, resolution: 'day' },
+        body: { configured: true, enabled: true, series: { totals: { visits: 42 } } },
+      },
+    });
+
+    const snapshot = await readAnalyticsSnapshot(
+      store as unknown as Parameters<typeof readAnalyticsSnapshot>[0],
+      'netlify',
+      '30d'
+    );
+    assert.ok(snapshot, 'the blob is readable');
+    assert.equal(isAnalyticsSnapshotFresh(snapshot, nowMs), true);
+    assert.deepEqual(store.reads, ['snapshots/analytics/netlify/30d.json'], 'one blob read');
+    assert.equal((snapshot.body as { series?: { totals?: { visits?: number } } }).series?.totals?.visits, 42);
+  });
+});
+
+test('M4: a STALE blob is still served — staleness triggers a refresh, never a wait', async () => {
+  const nowMs = Date.now();
+  const stale = {
+    schema_version: 'analytics-snapshot.v1' as const,
+    as_of: new Date(nowMs - ANALYTICS_SNAPSHOT_MAX_AGE_MS - 60_000).toISOString(),
+    source: 'netlify' as const,
+    range: '30d' as const,
+    window: { from: nowMs - 30 * 86_400_000, to: nowMs, resolution: 'day' as const },
+    body: { configured: true, enabled: true, series: { totals: { visits: 7 } } },
+  };
+  const store = snapshotBlobStore({ 'snapshots/analytics/netlify/30d.json': stale });
+  const snapshot = await readAnalyticsSnapshot(
+    store as unknown as Parameters<typeof readAnalyticsSnapshot>[0],
+    'netlify',
+    '30d'
+  );
+  assert.ok(snapshot);
+  // Stale is a fact about the answer, not a reason to withhold it: the body is
+  // there to serve, and `as_of` is what makes serving it honest.
+  assert.equal(isAnalyticsSnapshotFresh(snapshot, nowMs), false);
+  assert.equal((snapshot.body as { series?: { totals?: { visits?: number } } }).series?.totals?.visits, 7);
+});
+
+test('M4: a cold read BUILDS and stores — a spinner that resolves, never a zero from an empty cache', async () => {
+  const previous = { site: process.env.NETLIFY_SITE_ID, auth: process.env.NETLIFY_AUTH_TOKEN };
+  delete process.env.NETLIFY_SITE_ID;
+  delete process.env.NETLIFY_AUTH_TOKEN;
+  try {
+    await withNoOutboundCall(async () => {
+      const nowMs = Date.now();
+      const store = snapshotBlobStore();
+      const { snapshot, written } = await refreshAnalyticsSnapshot(
+        store as unknown as Parameters<typeof refreshAnalyticsSnapshot>[0],
+        {
+          source: 'netlify',
+          range: '30d',
+          window: { from: nowMs - 30 * 86_400_000, to: nowMs, resolution: 'day' },
+          nowMs,
+          binding: { siteId: 'site_test', env: PLATFORM_ENV_NAMES, dataRoot: 'sites/test/data/site' },
+        }
+      );
+      assert.equal(written, true);
+      assert.deepEqual(store.writes, ['snapshots/analytics/netlify/30d.json']);
+      // An unconfigured tenant is a catalogued, STORABLE body — never a throw,
+      // never an empty object that a chart would render as zeros.
+      assert.equal(snapshot.body.configured, false);
+      assert.equal(snapshot.body.error_code, 'analytics_lookup_unconfigured');
+      assert.ok(snapshot.as_of, 'every stored feed states when it was gathered');
+    });
+  } finally {
+    if (previous.site !== undefined) process.env.NETLIFY_SITE_ID = previous.site;
+    if (previous.auth !== undefined) process.env.NETLIFY_AUTH_TOKEN = previous.auth;
+  }
+});
+
+test('M4: the hourly warm refreshes the default range always, and the others only once somebody has opened them', () => {
+  // Derived from the client, not invented here: the three preset ranges a page
+  // can open on, both feeds it fetches on mount.
+  assert.deepEqual([...ANALYTICS_WARM_RANGES], ['7d', '30d', '90d']);
+  assert.deepEqual([...ANALYTICS_WARM_SOURCES], ['netlify', 'own']);
+  assert.ok(ANALYTICS_WARM_RANGES.every((range) => range !== 'custom'), 'a custom span is one operator’s ad-hoc window');
+
+  const seen = {
+    schema_version: 'analytics-snapshot.v1' as const,
+    as_of: new Date().toISOString(),
+    source: 'netlify' as const,
+    range: '90d' as const,
+    window: { from: 0, to: 1, resolution: 'day' as const },
+    body: {},
+  };
+  assert.equal(shouldWarmTarget('30d', undefined), true, 'the default pair keeps a dormant tenant warm');
+  assert.equal(shouldWarmTarget('90d', undefined), false, 'a range nobody has opened costs no upstream call');
+  assert.equal(shouldWarmTarget('90d', seen), true, 'a blob is the proof somebody uses that range');
+});
+
+// ═══ REVIEW2: what the wave-2 adversarial pass found and fixed ═════════════
+
+/**
+ * ONE KEY, EVERY CUSTOM SPAN.
+ *
+ * `analyticsSnapshotKey('own', 'custom')` is `snapshots/analytics/own/custom.json`
+ * for every custom window anybody has ever picked, and the design note above is
+ * right that a preset range must NOT be keyed by its window — that was M4's
+ * whole fix. `custom` is the case that argument does not cover: its endpoints
+ * are the operator's choice, not the clock's, so two operators (or one
+ * operator twice) share a blob that answers a different question. Before the
+ * fix a January span written by the first reader was served to the second as
+ * `fresh` for their June span; past the bound it was served stale AND the
+ * background refresh rebuilt it for June, so the wrong answer was the one that
+ * reached the page either way.
+ */
+test('REVIEW2 (M4): a custom-range blob answers only the window it was built for', () => {
+  const nowMs = Date.parse('2026-09-16T12:00:00.000Z');
+  const january = { from: Date.parse('2026-01-01T00:00:00.000Z'), to: Date.parse('2026-01-07T23:59:59.999Z') };
+  const june = { from: Date.parse('2026-06-01T00:00:00.000Z'), to: Date.parse('2026-06-30T23:59:59.999Z') };
+  const stored = {
+    schema_version: 'analytics-snapshot.v1' as const,
+    as_of: new Date(nowMs - 60_000).toISOString(),
+    source: 'own' as const,
+    range: 'custom' as const,
+    window: { ...january, resolution: 'day' as const },
+    body: { configured: true, enabled: true, stats: { visits: 11 } },
+  };
+
+  // The blob is FRESH by age — which is exactly why age alone could not have
+  // caught this, and why the page painted January's numbers over June.
+  assert.equal(isAnalyticsSnapshotFresh(stored, nowMs), true);
+  assert.equal(analyticsSnapshotCoversWindow(stored, 'custom', january), true, 'the span it was built for still hits');
+  assert.equal(analyticsSnapshotCoversWindow(stored, 'custom', june), false, 'another span is not stale, it is a different question');
+
+  // A preset range must keep sliding with the clock — the endpoints move on
+  // every load and a blob built a minute ago is the answer M4 exists to serve.
+  const preset = { ...stored, range: '30d' as const, window: { from: nowMs - 30 * 86_400_000, to: nowMs - 60_000, resolution: 'day' as const } };
+  assert.equal(analyticsSnapshotCoversWindow(preset, '30d', { from: nowMs - 30 * 86_400_000, to: nowMs }), true);
+});
+
+/**
+ * THE 30 s SCHEDULED-FUNCTION WALL, which this fleet has already been bitten by
+ * once (`media-compaction-run.ts:SWEEP_BUDGET_MS`; three days of kills with an
+ * empty log). The warm is the GUARANTEE behind M4 — the un-awaited background
+ * refresh is explicitly only an optimisation — so a silent kill here is the
+ * whole mechanism quietly stopping.
+ */
+test('REVIEW2 (M4): the warm runs the default pair first and stops starting pairs at its budget', () => {
+  const targets = analyticsWarmTargets();
+  assert.equal(targets.length, ANALYTICS_WARM_RANGES.length * ANALYTICS_WARM_SOURCES.length, 'every pair still gets a turn');
+  // `own/30d` is what a bare visit opens (DEFAULT_ANALYTICS_SOURCE +
+  // DEFAULT_ANALYTICS_RANGE); `netlify/30d` is the pageviews the own tab's
+  // capture-rate stat needs. A pass that runs out of clock must never be the
+  // reason either of those is cold.
+  assert.deepEqual(
+    targets.slice(0, 2),
+    [
+      { source: 'own', range: '30d' },
+      { source: 'netlify', range: '30d' },
+    ],
+    'the two feeds a default mount reads lead the pass'
+  );
+  assert.ok(
+    targets.every((target) => target.range !== 'custom'),
+    'a custom span is one operator’s ad-hoc window and is never warmed'
+  );
+  assert.ok(ANALYTICS_WARM_BUDGET_MS < 30_000, 'the budget has to leave room for the pair already in flight');
+});
+
+/**
+ * THE DAMPING PREDICATE IS ABOUT VALUES, NOT KEY ORDER.
+ *
+ * `previous` comes back through `chatSnapshotSchema.parse`, which rebuilds
+ * every object in SCHEMA order; `next` is built in memory by whatever code
+ * assembled the chat document. They agree today only by coincidence of field
+ * order in `agent/loop.ts`'s two `doc.runs.push({ … })` literals. If they ever
+ * stopped agreeing, the predicate would call every save MATERIAL — the hub
+ * would stay correct and the damping would silently evaporate into twenty arms
+ * and twenty commits per run, which is the cost M3.1 exists to avoid and which
+ * nothing else in this file would fail on.
+ */
+test('REVIEW2 (M3.1): the materiality rule ignores key order, so the damping cannot silently invert', () => {
+  const base = chatSnapshotRow(
+    chatDoc('chat_a', {
+      runs: [{ run_id: 'r1', started_at: '2026-09-01T00:00:00.000Z', finished_at: '2026-09-01T00:01:00.000Z', outcome: 'completed', chips: ['created X'] }],
+    })
+  );
+  // The same row with every object's keys written in a different order — what
+  // a reordered literal or a reordered schema would produce on one side only.
+  const reordered = JSON.parse(
+    JSON.stringify({
+      last_outcome: { chips: ['created X'], outcome: 'completed', finished_at: '2026-09-01T00:01:00.000Z', started_at: '2026-09-01T00:00:00.000Z', run_id: 'r1' },
+      created_by: base.created_by,
+      updated_at: base.updated_at,
+      status: base.status,
+      title: base.title,
+      kind: base.kind,
+      chat_id: base.chat_id,
+    })
+  ) as typeof base;
+  assert.equal(chatRowNeedsCommit(base, reordered), false, 'the same values in another order are not a change');
+  // …and a real change to the run summary still lands, which is the thing the
+  // order-independence must not buy at the cost of.
+  assert.equal(
+    chatRowNeedsCommit(base, { ...reordered, last_outcome: { ...base.last_outcome!, outcome: 'error' } }),
+    true,
+    'a run that ended differently is always material'
+  );
 });

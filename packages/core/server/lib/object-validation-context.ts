@@ -36,7 +36,7 @@ import { loadPdfContentChecks } from './pdf-content-check-store.js';
 import type { ObjectVerbStore } from './object-verbs.js';
 import { getPageTypeDefinition } from '../../lib/registry/page-types.js';
 import { isRegisteredSectionType } from '../../lib/registry/components/registered-types.js';
-import { objectDisplayName } from '../../lib/admin/display-name.js';
+import { objectDisplayName } from '../../lib/admin/display-name-core.js';
 import { objectTypes, type ObjectRecord, type ObjectType } from '../../schema/object-record-v1.js';
 import type { SectionType } from '../../schema/bodies/section-v1.js';
 

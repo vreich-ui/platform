@@ -32,7 +32,7 @@
 import { z } from 'zod';
 
 import type { Principal } from '../../../schema/object-record-v1.js';
-import { friendlyNameFromEmail } from '../../../lib/admin/display-name.js';
+import { friendlyNameFromEmail } from '../../../lib/admin/display-name-core.js';
 import type { MembershipPolicy } from '../../../lib/membership-policy.js';
 import {
   environmentRoleEntries,
@@ -52,7 +52,7 @@ import {
   type UserRecord,
   type UsersBlobStore,
 } from '../users-store.js';
-import type { OAuthBlobStore } from '../oauth-store.js';
+import type { OAuthBlobStore } from '../oauth-subject-index.js';
 import {
   InvitationError,
   assertMayInvite,

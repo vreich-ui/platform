@@ -35,7 +35,7 @@ import {
   requeueRequest,
   type EditorialRequestStore,
 } from '../requests/store.js';
-import { filterRequestRows, sortRequestRows, type RequestListFilters } from '../../../lib/admin/request-logic.js';
+import { filterRequestRows, sortRequestRows, type RequestListFilters } from '../../../lib/admin/request-list-order.js';
 import { buildObjectContract } from '../../../lib/registry/object-contract.js';
 import { mintId, MintIdError } from '../../../lib/object-ids-mint.js';
 import { validateObjectIdForType } from '../../../lib/object-ids.js';

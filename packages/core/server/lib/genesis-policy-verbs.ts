@@ -53,6 +53,7 @@ import {
   type GovernanceBlobStore,
   type GovernanceDoc,
 } from './governance-store.js';
+import { refreshGovernanceSnapshotAfterWrite } from './governance/snapshot-store.js';
 
 /** The same principal shape the membership core gates on (`caller-principal.ts` mints it). */
 export interface GenesisPolicyPrincipal {
@@ -179,5 +180,12 @@ export const handleGenesisPolicyVerb = async (input: GenesisPolicyVerbInput): Pr
     ],
   };
   await putGovernanceDoc(input.deps.governance, next);
+  // M3.4: every governance write is a writer of `snapshots/governance.json`,
+  // because every governance READ now comes from it — an owner who sets the
+  // genesis policy here and opens /admin/guardrails must not be shown the
+  // previous value until the next probe pass. Best-effort by construction
+  // (`refreshGovernanceSnapshotAfterWrite` never throws): the document write
+  // above is already durable and the five-minute schedule re-reads it.
+  await refreshGovernanceSnapshotAfterWrite(input.deps.governance, next, Date.now());
   return { status: 200, body: describePolicy(activeGenesisPolicy(), next.genesis) };
 };

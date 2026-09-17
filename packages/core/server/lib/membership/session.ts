@@ -27,7 +27,7 @@
  * separately for data this response was already holding. `policy_get` stays
  * exactly as it was for every other caller.
  */
-import { friendlyNameFromEmail } from '../../../lib/admin/display-name.js';
+import { friendlyNameFromEmail } from '../../../lib/admin/display-name-core.js';
 import type { MembershipPolicy } from '../../../lib/membership-policy.js';
 import type { Principal } from '../../../schema/object-record-v1.js';
 import { environmentRoleForEmail, type Role } from '../roles.js';

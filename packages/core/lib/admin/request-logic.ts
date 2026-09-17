@@ -280,45 +280,13 @@ export const requestsEmptyState = (
 };
 
 /**
- * Human labels for the `publishing_conductor` nodes, so a row reads
- * "researching" rather than "research". An unknown node falls back to its raw
- * id — hiding a node we do not recognise would be worse than showing it.
+ * INTEGRATE (wave 2): `NODE_LABELS` and `nodeLabel` moved to the leaf
+ * `request-node-labels.ts` so the two SERVER importers (`agent/tools.ts`,
+ * `requests/activity.ts`) can name a pipeline node without loading this
+ * module's screen vocabulary. Re-exported whole: no call site changed.
  */
-export const NODE_LABELS: Record<string, string> = {
-  input_triage: 'reading the brief',
-  placement_resolver: 'placing it',
-  topic_opportunity: 'sizing the topic',
-  monetization_strategy: 'planning the offer',
-  reader_insight: 'profiling the reader',
-  research: 'researching',
-  objection_mapping: 'mapping objections',
-  narrative_movement: 'shaping the narrative',
-  angle_strategy: 'choosing the angle',
-  brief_architect: 'writing the brief',
-  draft_writer: 'drafting',
-  human_texture: 'reviewing texture',
-  trust_factual: 'fact-checking',
-  emotional_resonance: 'reviewing resonance',
-  reader_simulation: 'simulating a reader',
-  review_aggregator: 'gathering reviews',
-  contract_intelligence: 'checking the contract',
-  artifact_plan: 'planning media',
-  article_body: 'building the article',
-  publish_payload: 'preparing to publish',
-  publication_controller: 'awaiting your approval',
-  publish_executor: 'publishing',
-  learning_recorder: 'recording what it learned',
-  capture_crawl: 'crawling the source',
-  capture_map: 'mapping the source',
-  block_classifier: 'classifying blocks',
-  capture_emit_live: 'building the site',
-  capture_score: 'scoring fidelity',
-  gap_adjudicator: 'adjudicating gaps',
-  capture_report: 'writing the report',
-};
-
-export const nodeLabel = (nodeId: string | undefined): string | undefined =>
-  nodeId ? (NODE_LABELS[nodeId] ?? nodeId) : undefined;
+import { nodeLabel } from './request-node-labels.js';
+export { NODE_LABELS, nodeLabel } from './request-node-labels.js';
 
 /**
  * B2: the Retry receipt.

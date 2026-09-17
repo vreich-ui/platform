@@ -29,6 +29,21 @@ import {
   STORE_READ_CONCURRENCY,
   type BlobListResponse,
 } from '../blob-list.js';
+/** M3.1 — the chat LIST costs one blob read; see `chat-snapshot-view.ts`. */
+import {
+  chatKindSchema,
+  chatStatusSchema,
+  compareChatRows,
+  readChatSnapshot,
+  runSummarySchema,
+  type ChatSnapshotRow,
+} from './chat-snapshot-view.js';
+import {
+  armChatSnapshotRow,
+  chatSnapshotRow,
+  commitChatSnapshotRow,
+  writeRebuiltChatSnapshot,
+} from './chat-snapshot-store.js';
 
 export const AGENT_CHAT_SCHEMA_VERSION = 'agent-chat.v1';
 
@@ -267,22 +282,15 @@ export const chatRunSchema = z.object({
 });
 export type ChatRun = z.infer<typeof chatRunSchema>;
 
-export const runSummarySchema = z.object({
-  run_id: z.string(),
-  started_at: z.string(),
-  finished_at: z.string(),
-  outcome: z.enum(['completed', 'error', 'cancelled', 'caps']),
-  /** Human outcome chips for the hub list ("created X", "published Y"). */
-  chips: z.array(z.string()),
-});
-export type RunSummary = z.infer<typeof runSummarySchema>;
+/** Defined in `chat-snapshot-view.ts` (the leaf); re-exported so every existing import of this module still resolves. */
+export { chatKindSchema, chatStatusSchema, runSummarySchema, type RunSummary } from './chat-snapshot-view.js';
 
 // ─── the chat doc ────────────────────────────────────────────────────────────
 
 export const chatDocSchema = z.object({
   schema_version: z.literal(AGENT_CHAT_SCHEMA_VERSION),
   chat_id: z.string(),
-  kind: z.enum(['object', 'free']),
+  kind: chatKindSchema,
   object_type: z.string().optional(),
   object_id: z.string().optional(),
   title: z.string(),
@@ -304,22 +312,7 @@ export const chatDocSchema = z.object({
    */
   origin_surface: z.string().max(64).optional(),
   origin_starter: z.string().max(64).optional(),
-  status: z.enum([
-    'idle',
-    'queued',
-    'running',
-    'awaiting_approval',
-    'awaiting_candidate',
-    /**
-     * D6 — the chat is waiting on a human to clear a blockage. A sibling of
-     * awaiting_approval/awaiting_candidate and written by the same single-writer
-     * rule: only a path that HOLDS the doc sets it, and only resolve/cancel
-     * clears it. Schema-additive; no pre-existing doc carries it.
-     */
-    'awaiting_blockage_resolution',
-    'error',
-    'cancelled',
-  ]),
+  status: chatStatusSchema,
   seq: z.number().int().nonnegative(),
   events: z.array(chatEventSchema),
   run: chatRunSchema.optional(),
@@ -349,7 +342,16 @@ export type ChatDoc = z.infer<typeof chatDocSchema>;
 
 export interface AgentChatStore {
   get(key: string): Promise<string | null>;
-  setJSON(key: string, value: unknown): Promise<void | { modified: boolean; etag?: string }>;
+  /** M3.1 — optional: the only source of a CAS token (`snapshots/guarded-doc.ts`). */
+  getWithMetadata?(
+    key: string,
+    options?: { type?: 'text' }
+  ): Promise<{ data: unknown; etag?: string } | null | undefined>;
+  setJSON(
+    key: string,
+    value: unknown,
+    options?: { onlyIfNew?: true; onlyIfMatch?: string }
+  ): Promise<void | { modified: boolean; etag?: string }>;
   list(options: {
     prefix: string;
     directories?: boolean;
@@ -370,8 +372,20 @@ export const loadChatDoc = async (store: AgentChatStore, chatId: string): Promis
   return chatDocSchema.parse(JSON.parse(raw));
 };
 
+/**
+ * THE chat-document writer, and — since M3.1 — what keeps
+ * `snapshots/chats.json` in step with it. The alarm is armed BEFORE the
+ * document is written and disarmed by the commit after, so a crash between
+ * leaves a sticky flag rather than a list quietly short a row; a save that does
+ * not materially change the row arms nothing (`chat-snapshot-store.ts`).
+ * Neither call can fail this write — the document is the truth, the list a
+ * cache of it.
+ */
 export const saveChatDoc = async (store: AgentChatStore, doc: ChatDoc): Promise<void> => {
+  const nowMs = Date.now();
+  const lease = await armChatSnapshotRow(store, doc, nowMs);
   await store.setJSON(chatDocKey(doc.chat_id), chatDocSchema.parse(doc));
+  await commitChatSnapshotRow(store, lease, Date.now());
 };
 
 /**
@@ -390,6 +404,11 @@ export const saveChatDoc = async (store: AgentChatStore, doc: ChatDoc): Promise<
  *
  * Failure semantics are unchanged: a read or `JSON.parse` that throws still
  * rejects the whole listing, exactly as the serial loop did.
+ *
+ * M3.1: this is now the REPAIR path, not the list path. `readChatList` below
+ * serves the hub from one blob and falls through to here only when that blob
+ * cannot be trusted — which is what "the proper fix is a summary doc" above
+ * turned into.
  */
 export const listChatDocs = async (store: AgentChatStore): Promise<ChatDoc[]> => {
   const items = await collectBlobListItems(
@@ -403,6 +422,25 @@ export const listChatDocs = async (store: AgentChatStore): Promise<ChatDoc[]> =>
     if (parsed.success) docs.push(parsed.data);
   }
   return docs.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+};
+
+/**
+ * THE LIST. One blob read on the happy path. `rebuilt` reports the repair the
+ * way `objects/index-store.ts`'s `stats.rebuilt` does: a missing, unreadable,
+ * unparseable, wrong-schema or ARMED snapshot is rebuilt here from the
+ * transcripts and written back, so the next caller pays one read again. No
+ * migration; a cold tenant pays one sweep, once. Rows come back in hub order
+ * and unscoped — `visibleChatDocs` is still the caller's to apply.
+ */
+export const readChatList = async (
+  store: AgentChatStore,
+  nowMs: number = Date.now()
+): Promise<{ rows: ChatSnapshotRow[]; rebuilt: boolean }> => {
+  const snapshot = await readChatSnapshot(store);
+  if (snapshot) return { rows: snapshot.chats, rebuilt: false };
+  const rows = (await listChatDocs(store)).map(chatSnapshotRow).sort(compareChatRows);
+  await writeRebuiltChatSnapshot(store, rows, nowMs);
+  return { rows, rebuilt: true };
 };
 
 export const appendChatEvent = (

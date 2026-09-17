@@ -23,6 +23,8 @@ import {
 } from './store.js';
 import { getSiteIdentity } from '../../../lib/site-identity.js';
 import { collectBlobListItems } from '../blob-list.js';
+import { readMembersSnapshot } from './snapshot-view.js';
+import { writeRebuiltMembersSnapshot } from './snapshot-store.js';
 
 /** The pre-T18.1 record shape (users-store.ts v1), accepted verbatim on read. */
 export const legacyUserRecordSchema = z.object({
@@ -154,6 +156,10 @@ export const getMembershipByIdentity = async (store: MembershipStore, userId: st
 /**
  * Every member: v2 memberships plus any v1 rows not yet rewritten. Corrupt
  * entries are skipped. Sorted by e-mail.
+ *
+ * M3.2: this is the SWEEP. It is the repair behind `readMemberList` below and
+ * the read for the two write-path guards that must not trust a cache; no
+ * page-rate caller may call it directly.
  */
 export const listMembers = async (store: MembershipStore): Promise<Member[]> => {
   const byPerson = new Map<string, Member>();
@@ -188,7 +194,30 @@ export const listMembers = async (store: MembershipStore): Promise<Member[]> => 
   return [...byPerson.values()].sort((a, b) => a.person.email.localeCompare(b.person.email));
 };
 
-/** Stored ACTIVE owners (for the `min_owners` guard — env bootstrap owners are counted by the caller). */
+/**
+ * THE LIST. One blob read on the happy path. `rebuilt` reports the repair the
+ * way `objects/index-store.ts`'s `stats.rebuilt` does: a missing, unreadable,
+ * unparseable, wrong-schema or ARMED snapshot is rebuilt here by the same
+ * `listMembers` sweep and written back, so the next caller pays one read
+ * again. No migration; a cold tenant pays one sweep, once.
+ */
+export const readMemberList = async (
+  store: MembershipStore,
+  nowMs: number = Date.now()
+): Promise<{ members: Member[]; rebuilt: boolean }> => {
+  const snapshot = await readMembersSnapshot(store);
+  if (snapshot) return { members: snapshot.members, rebuilt: false };
+  const members = await listMembers(store);
+  await writeRebuiltMembersSnapshot(store, members, nowMs);
+  return { members, rebuilt: true };
+};
+
+/**
+ * Stored ACTIVE owners (`min_owners` guard; env bootstrap owners are counted by
+ * the caller). Deliberately on the SWEEP: this decides whether a workspace may
+ * be left with no owner, it runs on a hand-triggered write path, and a guard
+ * reads records.
+ */
 export const countActiveOwners = async (store: MembershipStore, exceptPersonId?: string): Promise<number> =>
   (await listMembers(store)).filter(
     (m) => m.membership.role === 'owner' && m.membership.status === 'active' && m.person.person_id !== exceptPersonId

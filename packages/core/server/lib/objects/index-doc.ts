@@ -23,7 +23,12 @@
  */
 import { z } from 'zod';
 
-import { inventoryRowFromRecord } from '../object-inventory.js';
+/**
+ * M3.3 — the LEAF spelling. `object-inventory.js` re-exports this name and
+ * adds the filter/sort/detail vocabulary a WRITER never calls; either compiles,
+ * only this one is on `admin-users`' diet. See `object-inventory-row.ts`.
+ */
+import { inventoryRowFromRecord } from '../object-inventory-row.js';
 import type { ApprovalPolicy } from '../../../lib/approval-policy.js';
 import type { ObjectRecord } from '../../../schema/object-record-v1.js';
 
@@ -200,10 +205,23 @@ export type IndexRead = {
  * the plain `get` so a fake store that only implements `get` still works, at
  * the cost of never being able to write conditionally.
  */
-const readIndexBlob = async (store: ObjectIndexDocStore): Promise<{ raw: string | null; etag: string | undefined }> => {
+/**
+ * The same read, at any key. INTEGRATE (wave 2): M3.3 lifted this out of
+ * `readIndexBlob` and EXPORTED it, so that its own alarm plumbing could reuse
+ * it rather than copy it. That plumbing is gone — `snapshots/visual-identity.json`
+ * is a `snapshots/guarded-doc.ts` document now and uses that module's
+ * `readBlobWithEtag`, which is this function generalised the other way — so the
+ * export has no consumer and is private again. The key parameter stays: it is
+ * what makes the two spellings interchangeable if a third document ever wants
+ * one of them.
+ */
+const readDocBlob = async (
+  store: ObjectIndexDocStore,
+  key: string
+): Promise<{ raw: string | null; etag: string | undefined }> => {
   if (typeof store.getWithMetadata === 'function') {
     try {
-      const result = await store.getWithMetadata(OBJECT_INDEX_KEY, { type: 'text' });
+      const result = await store.getWithMetadata(key, { type: 'text' });
       if (!result) return { raw: null, etag: undefined };
       const data = result.data;
       return {
@@ -215,11 +233,13 @@ const readIndexBlob = async (store: ObjectIndexDocStore): Promise<{ raw: string 
     }
   }
   try {
-    return { raw: await store.get(OBJECT_INDEX_KEY), etag: undefined };
+    return { raw: await store.get(key), etag: undefined };
   } catch {
     return { raw: null, etag: undefined };
   }
 };
+
+const readIndexBlob = (store: ObjectIndexDocStore) => readDocBlob(store, OBJECT_INDEX_KEY);
 
 export const readObjectIndex = async (store: ObjectIndexDocStore): Promise<IndexRead> => {
   const { raw, etag } = await readIndexBlob(store);

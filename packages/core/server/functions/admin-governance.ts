@@ -43,12 +43,18 @@ import {
   describeAgentKeys,
   type AgentKeysBlobStore,
 } from '../lib/agent-keys.js';
+import {
+  cmsAgentHealthFromProbe,
+  cmsAgentProbeView,
+  loadGovernanceSnapshot,
+  refreshGovernanceSnapshotAfterWrite,
+  type CmsAgentProbeResult,
+} from '../lib/governance/snapshot-store.js';
 import { CHAT_TOOLS, defaultAutonomyFor } from '../lib/agent/tools.js';
 import { migrateAutonomyKeys, generatedChatToolByName } from '../lib/agent/generated-tools.js';
 import { CHAT_TOOL_ALIASES } from '../lib/mcp-tool-definitions.js';
 import { MEMBERSHIP_TOOL_NAMES } from '../lib/mcp-tool-definitions-membership.js';
-import { CmsAgentClient, cmsAgentMissingEnvVars } from '../lib/agent/cms-agent-client.js';
-import { getSiteIdentity } from '../../lib/site-identity.js';
+import { cmsAgentMissingEnvVars } from '../lib/agent/cms-agent-client.js';
 import { approvalPolicyConfigSchema, activeApprovalPolicy } from '../../lib/approval-policy.js';
 import { creationPolicyConfigSchema, activeCreationPolicy } from '../../lib/creation-policy.js';
 import { activeGenesisPolicy, genesisPolicyConfigSchema } from '../../lib/genesis-policy.js';
@@ -173,106 +179,55 @@ const committed = () => ({
   genesis: activeGenesisPolicy(),
 });
 
-// ─── PF3: CMS-Agent bridge status (memoized health probe) ────────────────────
-
-const CMS_AGENT_HEALTH_TTL_MS = 60_000;
-/**
- * T-perf wave 3 — after last wave's one-doc-read + `Promise.all` fix shipped,
- * re-measurement showed `work` barely moved (2126 -> 2002 ms). `sec.doc` /
- * `sec.probe` below are what let the NEXT measurement say which half that
- * still is, but the code-level reasoning already points one way: `doc` is a
- * single Netlify Blobs GET, and `probe` — when the memo below is cold, which
- * it always is on a cold container, by construction — is up to three SERIAL
- * cross-service HTTP calls (`initialize`, `notifications/initialized`,
- * `tools/call` for `agent_resolve`), each of which inherited
- * `CmsAgentClient`'s conversational-turn default of 90 s per call with no
- * override. A live-conversation turn can legitimately need that; a
- * governance-page STATUS check cannot — nothing here reads the probe's
- * result to decide anything, `cmsAgentStatus` below turns a failure of any
- * kind into `{configured, health: {ok:false, code, message}}`, never an
- * error response. 3 s is a deliberately tight budget for what should be a
- * same-region, no-payload health call: generous under normal conditions,
- * and it bounds the worst case (a lost session forcing a fresh handshake) to
- * single-digit seconds instead of tens-to-hundreds of them. Scoped to THIS
- * client instance only — every other `CmsAgentClient` caller (chat turns,
- * node execution) keeps the 90 s default this constant does not touch.
- */
-export const CMS_AGENT_PROBE_TIMEOUT_MS = 3_000;
-const cmsAgentHealthClient = new CmsAgentClient({ timeoutMs: CMS_AGENT_PROBE_TIMEOUT_MS });
-/** Keyed by project id: each site is its own Netlify process, but a keyed
- *  cache removes the whole cross-tenant-staleness class outright. Module
- *  scope, so it survives across invocations of a WARM container — the only
- *  thing it cannot do anything about is a cold one, which starts with an
- *  empty module and therefore an empty cache by construction (see `sec.probe`
- *  above for what covers that case instead). */
-const cmsAgentHealthCache = new Map<string, { at: number; health: Record<string, unknown> }>();
+// ─── M3.4: CMS-Agent bridge status, READ FROM THE SNAPSHOT ───────────────────
 
 /**
- * Test-only: the memo living at module scope is the whole point in
- * production (it is what makes a warm container's second-and-later `get`
- * skip the network call entirely), but that same persistence means a test
- * that calls `cmsAgentProbe` directly — the only way to exercise the timeout
- * fix behaviorally rather than by source inspection — would otherwise see
- * whatever an earlier test in this same process already cached. Never
- * imported outside admin-governance.test.ts.
- */
-export const __resetCmsAgentProbeCacheForTesting = (): void => {
-  cmsAgentHealthCache.clear();
-};
-
-type CmsAgentProbe = { missing: string[]; health?: Record<string, unknown> };
-
-/**
- * The SLOW half — env check plus the memoized live `agent_resolve` probe.
- * Env NAMES only, never values; the probe is read-only and cached for a
- * minute so the governance page cannot hammer the service.
+ * What used to live here: `CMS_AGENT_HEALTH_TTL_MS`, a module-scope
+ * `Map` keyed by project id, `cmsAgentProbe` and a `CmsAgentClient`
+ * instance — a LIVE cross-service health probe on the `get` verb, which is
+ * what `/admin/guardrails` and `/admin/visual-identity` both call on load.
+ * Measured 2026-09-16: `governance` 3.9 s on visual identity with
+ * `sec.probe = 2768`, and `work = 109` on guardrails two minutes later. The
+ * second number is not the fix, it is the memo lottery — module scope, many
+ * instances, a cold container starts empty by construction — and wave 1
+ * already established that it protects nobody.
  *
- * Deliberately takes NOTHING from the governance doc. On a cold container
- * this is a real cross-service HTTP round trip, and it used to be awaited
- * only AFTER the doc read had already returned — purely because the wire
- * shape carries one doc-derived field (`legacy_mode_override_ignored`).
- * Separating the probe from the field lets the `get` verb start both at once
- * (`Promise.all`) and pay for the slower one, not for both in series.
+ * M3.4 moved the probe to `lib/governance/cms-agent-probe.ts`, called only by
+ * the five-minute `functions/governance-probe-refresh.ts`, which stores its
+ * result in `snapshots/governance.json`. This function reads that blob. The
+ * probe module is not imported here and must not become reachable from here:
+ * the milestone is not "probe less often", it is "a page never probes".
  *
- * Exported for admin-governance.test.ts — whether a hung CMS-Agent actually
- * degrades this to an unknown status within `CMS_AGENT_PROBE_TIMEOUT_MS`,
- * instead of failing the read or blocking past it, is a runtime property no
- * source-level regex can prove (this file's established pattern for what it
- * CAN prove at the source level; see the wiring test below).
+ * `configured` is unchanged and still answered live, because it is an env-var
+ * NAME check with no network — so the one state an operator can actually act
+ * on (this tenant has no CMS-Agent credentials) is still immediate, even on a
+ * tenant whose schedule has never run.
  */
-export const cmsAgentProbe = async (binding: SiteBinding): Promise<CmsAgentProbe> => {
-  const missing = cmsAgentMissingEnvVars(binding.env);
-  if (missing.length > 0) return { missing };
-  const projectId = getSiteIdentity().cmsAgentProjectId;
-  const now = Date.now();
-  const cached = cmsAgentHealthCache.get(projectId);
-  if (!cached || now - cached.at > CMS_AGENT_HEALTH_TTL_MS) {
-    const probe = await cmsAgentHealthClient.resolveAgent({ role: 'client_manager', project_id: projectId });
-    cmsAgentHealthCache.set(projectId, {
-      at: now,
-      health: probe.ok
-        ? { ok: true, agent_ref: probe.data.agent_ref }
-        : { ok: false, code: probe.code, message: probe.message },
-    });
-  }
-  return { missing, health: cmsAgentHealthCache.get(projectId)!.health };
-};
-
-/** Config + permanent mode + the probe's outcome, in the key order this
- *  object has always been serialized in (the ETag hashes the wire body). */
 const cmsAgentStatus = (
-  probe: CmsAgentProbe,
+  binding: SiteBinding,
+  probe: CmsAgentProbeResult | null,
+  nowMs: number,
   legacyOverride?: 'off' | 'fallback' | 'required'
 ): Record<string, unknown> => {
+  const missing = cmsAgentMissingEnvVars(binding.env);
   const status: Record<string, unknown> = {
-    configured: probe.missing.length === 0,
-    ...(probe.missing.length > 0 ? { missing_env: probe.missing } : {}),
+    configured: missing.length === 0,
+    ...(missing.length > 0 ? { missing_env: missing } : {}),
     mode: 'required',
     mode_source: 'permanent_default',
     ...(legacyOverride ? { legacy_mode_override_ignored: legacyOverride } : {}),
+    /**
+     * The three-state reading (`never_checked` / `fresh` / `stale`) with the
+     * bound it was taken against. New in M3.4 and the honest part of the
+     * wire: a verdict without a `checked_at` cannot be told apart from one
+     * taken an hour ago.
+     */
+    probe: cmsAgentProbeView(probe, nowMs),
   };
-  if (probe.health === undefined) return status;
-  return { ...status, health: probe.health };
+  const health = cmsAgentHealthFromProbe(probe);
+  // Absent when nobody has ever probed — exactly what the pre-M3.4 shape did
+  // for a tenant it never probed, so no client sees a new shape here.
+  return health === undefined ? status : { ...status, health };
 };
 
 /** The chat-tool catalog for the guardrails table — the SINGLE source is
@@ -339,23 +294,35 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     const req = request.data;
 
     if (req.verb === 'get') {
-      // ONE read of `overrides.v1` (this used to read the same blob twice —
-      // once here and once inside resolveActivePolicies — then wait for the
-      // CMS-Agent probe on top of both, all in series). `timeSection` splits
-      // `work` by QUESTION ASKED (see admin-editorial-assets.ts for the same
-      // pattern) so Server-Timing's `sec.doc` / `sec.probe` say which of the
-      // two concurrent halves is actually the long pole, instead of that
-      // being an inference again.
-      const [doc, probe] = await Promise.all([
-        timeSection('doc', () => getGovernanceDoc(store)),
-        timeSection('probe', () => cmsAgentProbe(binding)),
-      ]);
+      /**
+       * M3.4 — ONE blob read, and no network call of any kind.
+       *
+       * Before: one read of `overrides.v1` CONCURRENT WITH a live CMS-Agent
+       * probe, and the verb paid for the slower of the two — which on a cold
+       * container was always the probe (2768 ms measured on
+       * `/admin/visual-identity`, which reads exactly one field of this
+       * response). Now: one read of `snapshots/governance.json`, which
+       * carries the document AND the last probe result.
+       *
+       * `sec.snapshot` covers both outcomes, and `snapshot.repaired` on the
+       * wire says which one happened: a repair is one extra read of
+       * `overrides.v1` plus one write — the old read path, kept as the
+       * self-healing repair (AGENTS.md: self-healing over migrations) and
+       * reached when the blob is absent, unparseable, written by another
+       * schema version, or older than `GOVERNANCE_SNAPSHOT_MAX_AGE_MS`. A
+       * surface answering `repaired: true` on every request has a dead
+       * schedule; that is what the flag exists to make visible.
+       */
+      const { snapshot, repaired } = await timeSection('snapshot', () => loadGovernanceSnapshot(store, Date.now()));
+      const doc = snapshot.doc;
       return readJsonResponse(event, {
         doc,
         committed: committed(),
         active: activePoliciesFromDoc(doc),
         chat_tools_catalog: chatToolsCatalog,
-        cms_agent: cmsAgentStatus(probe, doc?.cms_agent_chat_mode),
+        cms_agent: cmsAgentStatus(binding, snapshot.cms_agent_probe, Date.now(), doc?.cms_agent_chat_mode),
+        /** `as_of` on the wire, so a lagging snapshot is visible rather than silent (the `snapshots/release.json` convention). */
+        snapshot: { as_of: snapshot.as_of, source: snapshot.source, repaired },
       });
     }
 
@@ -460,6 +427,18 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     }
 
     await putGovernanceDoc(store, next);
+    /**
+     * M3.4 — the write path is one of `snapshots/governance.json`'s writers.
+     *
+     * Without this an Owner would save a guardrail and then read the previous
+     * value back for up to five minutes, because every READ now comes from
+     * the snapshot. Same reasoning, same shape, as `object_publish` refreshing
+     * `snapshots/release.json` rather than waiting for its schedule. Awaited
+     * rather than fired and forgotten: the response below IS the Owner's next
+     * read of this data, and a function frozen after its response would not
+     * finish the write.
+     */
+    await refreshGovernanceSnapshotAfterWrite(store, next, Date.now());
     return jsonResponse(200, {
       doc: next,
       committed: committed(),

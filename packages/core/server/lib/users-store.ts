@@ -23,7 +23,7 @@
  */
 import { z } from 'zod';
 
-import { getMembershipByEmail, listMembers, type Member } from './membership/read.js';
+import { getMembershipByEmail, readMemberList, type Member } from './membership/read.js';
 import { newMember, saveMember } from './membership/write.js';
 import {
   KEYS,
@@ -185,9 +185,16 @@ export const putUserRecord = async (store: UsersBlobStore, record: UserRecord): 
   await saveMember(store, { person, membership });
 };
 
-/** All valid user records (corrupt entries skipped), sorted by e-mail. `removed` memberships are included as `disabled`. */
+/**
+ * All valid user records (corrupt entries skipped), sorted by e-mail.
+ * `removed` memberships are included as `disabled`.
+ *
+ * M3.2: ONE blob read (`snapshots/members.json`), with the old N+1 sweep kept
+ * as the repair behind `readMemberList`. The view projection is unchanged —
+ * the snapshot stores the `Member` pair, not a second copy of this shape.
+ */
 export const listUserRecords = async (store: UsersBlobStore): Promise<UserRecord[]> =>
-  (await listMembers(store)).map(memberToUserRecord);
+  (await readMemberList(store)).members.map(memberToUserRecord);
 
 /** Append an audit entry (returns a new record; does not persist). */
 export const withAuditEntry = (record: UserRecord, entry: UserAuditEntry): UserRecord => ({

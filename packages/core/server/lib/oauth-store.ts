@@ -31,10 +31,35 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 
-import { collectBlobListItems, type BlobListResponse } from './blob-list.js';
+import { collectBlobListItems } from './blob-list.js';
 
-/** Every key this module owns lives under one prefix, so an operator can see the whole surface in one `list`. */
-export const OAUTH_KEY_PREFIX = 'oauth/';
+/**
+ * Every key this module owns lives under one prefix, so an operator can see the
+ * whole surface in one `list`.
+ *
+ * INTEGRATE (wave 2): `OAUTH_KEY_PREFIX`, `OAuthBlobStore` and the by-subject
+ * index moved to the leaf `oauth-subject-index.ts` so `membership/offboarding.ts`
+ * — which is on `admin-users`' cold start — can revoke a person's grants
+ * without loading this module's 27 KB of minting and rotation. Imported (not
+ * only re-exported) because this file uses them below; re-exported so every
+ * existing `from './oauth-store.js'` caller keeps working unchanged.
+ */
+import {
+  OAUTH_KEY_PREFIX,
+  subjectIndexEntrySchema,
+  subjectIndexKey,
+  subjectIndexPrefix,
+  type OAuthBlobStore,
+  type SubjectIndexEntry,
+} from './oauth-subject-index.js';
+export {
+  OAUTH_KEY_PREFIX,
+  subjectIndexEntrySchema,
+  subjectIndexKey,
+  subjectIndexPrefix,
+  type OAuthBlobStore,
+  type SubjectIndexEntry,
+};
 
 /**
  * Lifetimes. Short access tokens are the spec's own mitigation for token theft
@@ -189,38 +214,6 @@ export const refreshTokenSchema = z.object({
   rotated_at: z.string().optional(),
 });
 export type RefreshTokenRecord = z.infer<typeof refreshTokenSchema>;
-
-export interface OAuthBlobStore {
-  get(key: string): Promise<string | null>;
-  setJSON(key: string, value: unknown): Promise<void | { modified: boolean; etag?: string }>;
-  /** Netlify Blobs exposes `delete`; the file-backed dev/test store exposes `del`. Either satisfies this module. */
-  delete?(key: string): Promise<void>;
-  del?(key: string): Promise<void>;
-  /** W18 T18.4: needed only by revocation-by-subject (offboarding); absent on stores that cannot list. */
-  /** MUST be consumed through `collectBlobListItems` — see blob-list.ts. */
-  list?(options: {
-    prefix: string;
-    directories?: boolean;
-    paginate?: boolean;
-  }): BlobListResponse | Promise<BlobListResponse>;
-}
-
-/**
- * W18 T18.4 — the by-subject index. Token/refresh/code records are keyed by
- * sha256(value) and carry `subject_email`, but nothing could enumerate "every
- * grant this person holds" — so suspend/remove could not revoke them. Every
- * mint now ALSO writes `oauth/by-subject/<email>/<kind>-<hash>.json` →
- * `{ kind, key }`; `revokeOAuthGrantsForSubject` (membership/offboarding.ts)
- * lists that prefix and deletes both halves. Records minted before this
- * change are not indexed until they rotate (access tokens live 1h, refresh
- * tokens rotate on every use) — documented in plan §5.
- */
-export const subjectIndexPrefix = (subjectEmail: string) =>
-  `${OAUTH_KEY_PREFIX}by-subject/${subjectEmail.trim().toLowerCase()}/`;
-export const subjectIndexKey = (subjectEmail: string, kind: 'token' | 'refresh' | 'code', recordKey: string) =>
-  `${subjectIndexPrefix(subjectEmail)}${kind}-${recordKey.split('/').pop()}`;
-export const subjectIndexEntrySchema = z.object({ kind: z.enum(['token', 'refresh', 'code']), key: z.string().min(1) });
-export type SubjectIndexEntry = z.infer<typeof subjectIndexEntrySchema>;
 
 const writeSubjectIndex = async (
   store: OAuthBlobStore,
