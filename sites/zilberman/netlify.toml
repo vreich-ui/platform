@@ -209,6 +209,18 @@
   status = 200
   force = true
 
+# /api/artifacts/upload: packages/core/server/functions/artifact-upload.ts declares
+# `export const config = { path: '/api/artifacts/upload' }`, but every site file only reaches
+# it through `export * from '<core>'` -- a re-exported `config` is not statically resolvable, so
+# Netlify never registers the path on any deployed tenant (verified fleet-wide 404 on
+# 2026-09-17, while /.netlify/functions/artifact-upload itself answered 401/415, proving the
+# function IS deployed). Redirect it by hand, same as /img/* and /pdf/* above.
+[[redirects]]
+  from = "/api/artifacts/upload"
+  to = "/.netlify/functions/artifact-upload"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/mcp"
   to = "/.netlify/functions/mcp"

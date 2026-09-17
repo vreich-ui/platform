@@ -50,6 +50,11 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
   redirects: [
     { from: '/pdf/*', to: '/.netlify/functions/get-public-pdf?blobKey=pdf/:splat', status: 200 },
     { from: '/img/*', to: '/.netlify/functions/get-public-image?blobKey=image/:splat', status: 200 },
+    // A re-exported `config` (every site's artifact-upload.ts is `export * from '<core>'`) is
+    // not statically resolvable, so Netlify never registers the path the core function
+    // declares -- redirect it by hand, same as /img/* and /pdf/* above (fleet-wide 404 verified
+    // 2026-09-17).
+    { from: '/api/artifacts/upload', to: '/.netlify/functions/artifact-upload', status: 200 },
     { from: '/mcp', to: '/.netlify/functions/mcp', status: 200 },
     // W3.1: the ChatGPT Actions facade over this tenant's MCP tools. One splat —
     // the tool name is the last path segment and the function routes on it, so

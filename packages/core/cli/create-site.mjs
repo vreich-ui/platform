@@ -654,6 +654,11 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
   redirects: [
     { from: '/pdf/*', to: '/.netlify/functions/get-public-pdf?blobKey=pdf/:splat', status: 200 },
     { from: '/img/*', to: '/.netlify/functions/get-public-image?blobKey=image/:splat', status: 200 },
+    // A re-exported \`config\` (every site's artifact-upload.ts is \`export * from '<core>'\`) is
+    // not statically resolvable, so Netlify never registers the path the core function
+    // declares -- redirect it by hand, same as /img/* and /pdf/* above (fleet-wide 404 verified
+    // 2026-09-17).
+    { from: '/api/artifacts/upload', to: '/.netlify/functions/artifact-upload', status: 200 },
     { from: '/mcp', to: '/.netlify/functions/mcp', status: 200 },
     { from: '/.well-known/oauth-protected-resource', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata', status: 200 },
     { from: '/.well-known/oauth-protected-resource/*', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata', status: 200 },
@@ -851,6 +856,18 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 [[redirects]]
   from = "/img/*"
   to = "/.netlify/functions/get-public-image?blobKey=image/:splat"
+  status = 200
+  force = true
+
+# /api/artifacts/upload: packages/core/server/functions/artifact-upload.ts declares
+# \`export const config = { path: '/api/artifacts/upload' }\`, but every site file only reaches
+# it through \`export * from '<core>'\` -- a re-exported \`config\` is not statically resolvable, so
+# Netlify never registers the path on any deployed tenant (verified fleet-wide 404 on
+# 2026-09-17, while /.netlify/functions/artifact-upload itself answered 401/415, proving the
+# function IS deployed). Redirect it by hand, same as /img/* and /pdf/* above.
+[[redirects]]
+  from = "/api/artifacts/upload"
+  to = "/.netlify/functions/artifact-upload"
   status = 200
   force = true
 
