@@ -38,7 +38,12 @@ import { objectTypes, type ObjectRecord } from '../../../schema/object-record-v1
 import { isObjectLockActive } from '../object-lock.js';
 import { collectBlobListItems, type BlobListItem, type BlobListResponse } from '../blob-list.js';
 import { objectRecordKey, objectStatusIndexPrefix } from '../object-store-keys.js';
-import { putObjectRecord, type ObjectRecordWriteStore } from '../objects/record-writer.js';
+import {
+  loadRecordWithEtag,
+  putObjectRecord,
+  RecordWriteConflictError,
+  type ObjectRecordWriteStore,
+} from '../objects/record-writer.js';
 import { subjectIndexEntrySchema, subjectIndexPrefix, type OAuthBlobStore } from '../oauth-subject-index.js';
 import { getMembershipByEmail, listMembers, type Member } from './read.js';
 import { listInvitations, type FetchLike, type GoTrueIdentity } from './invitations.js';
@@ -56,7 +61,7 @@ import {
 import { appendAudit, getPolicy, listAuditForEmail, saveMember, putMembership } from './write.js';
 import { armMembersSnapshot, commitMembersSnapshot } from './snapshot-store.js';
 
-// ── OAuth grants ────────────────────────────────────────────────────────────
+// ── OAuth grants ───────────────────────────────────────────────────────────
 
 const deleteKey = async (store: OAuthBlobStore, key: string): Promise<void> => {
   if (typeof store.delete === 'function') {
@@ -108,7 +113,7 @@ export const revokeOAuthGrantsForSubject = async (
   return { revoked, kinds };
 };
 
-// ── locks ───────────────────────────────────────────────────────────────────
+// ── locks ──────────────────────────────────────────────────────────────
 
 /**
  * The object store surface the lock hand-off needs. M0.1: the write half is
@@ -167,48 +172,67 @@ export const releaseLocksHeldBy = async (
       const objectId = blob.key.split('/').pop() ?? '';
       if (!objectId) continue;
       const key = objectRecordKey(objectType, objectId);
-      let record: ObjectRecord | undefined;
-      try {
-        record = parseRecord(await store.get(key));
-      } catch {
-        record = undefined;
-      }
-      if (!record?.lock || !isObjectLockActive(record.lock, nowMs)) continue;
-      const lock = record.lock;
-      const held =
-        (input.person.user_id && lock.owner_id === input.person.user_id) ||
-        normalizeEmail(lock.owner_label ?? '') === email ||
-        normalizeEmail(lock.owner_id ?? '') === email;
-      if (!held) continue;
-      const next: ObjectRecord = {
-        ...record,
-        lock: undefined,
-        updated_at: input.at,
-        version: record.version + 1,
-        history: [
-          ...record.history,
-          {
-            at: input.at,
-            action: 'lock_forced_on_offboarding',
-            actor: input.actor,
-            details: {
-              reason: input.reason,
-              on_behalf_of: {
-                email,
-                person_id: input.person.person_id,
-                ...(input.person.user_id ? { user_id: input.person.user_id } : {}),
+
+      // P1: a RESTAMP (see `object-lock.ts`'s header) — read, recompute the
+      // lock-release transition, write with a `{kind:'match'}` precondition,
+      // and on a lost condition re-read and recompute from scratch. Bounded
+      // and best-effort: one persistently hot record must not stop the sweep
+      // from releasing the rest, so it is skipped and left for the next run.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        let current: { record: ObjectRecord; etag: string | undefined } | undefined;
+        try {
+          current = await loadRecordWithEtag(store, key);
+        } catch {
+          current = undefined;
+        }
+        const record = current?.record;
+        if (!record?.lock || !isObjectLockActive(record.lock, nowMs)) break;
+        const lock = record.lock;
+        const held =
+          (input.person.user_id && lock.owner_id === input.person.user_id) ||
+          normalizeEmail(lock.owner_label ?? '') === email ||
+          normalizeEmail(lock.owner_id ?? '') === email;
+        if (!held) break;
+        const next: ObjectRecord = {
+          ...record,
+          lock: undefined,
+          updated_at: input.at,
+          version: record.version + 1,
+          history: [
+            ...record.history,
+            {
+              at: input.at,
+              action: 'lock_forced_on_offboarding',
+              actor: input.actor,
+              details: {
+                reason: input.reason,
+                on_behalf_of: {
+                  email,
+                  person_id: input.person.person_id,
+                  ...(input.person.user_id ? { user_id: input.person.user_id } : {}),
+                },
+                previous_owner_id: lock.owner_id,
+                previous_owner_label: lock.owner_label,
               },
-              previous_owner_id: lock.owner_id,
-              previous_owner_label: lock.owner_label,
             },
-          },
-        ],
-      };
-      // M0.1: through the choke point — a forced check-in changes `lock`, which
-      // is the one index field `index-store.ts` re-derives per read, so an
-      // un-indexed write here would show a lease that nobody holds.
-      await putObjectRecord(store, { record: next, nowMs });
-      released.push({ object_id: record.object_id, object_type: record.object_type });
+          ],
+        };
+        // M0.1: through the choke point — a forced check-in changes `lock`, which
+        // is the one index field `index-store.ts` re-derives per read, so an
+        // un-indexed write here would show a lease that nobody holds.
+        try {
+          await putObjectRecord(store, {
+            record: next,
+            nowMs,
+            ...(current?.etag ? { precondition: { kind: 'match' as const, etag: current.etag } } : {}),
+          });
+          released.push({ object_id: record.object_id, object_type: record.object_type });
+          break;
+        } catch (error) {
+          if (error instanceof RecordWriteConflictError) continue; // re-read and retry
+          throw error;
+        }
+      }
     }
   }
   return released;
@@ -348,7 +372,7 @@ export const drainIdentityDeleteQueue = async (
   return { drained, remaining: blobs.length - drained };
 };
 
-// ── purge / scrub ───────────────────────────────────────────────────────────
+// ── purge / scrub ─────────────────────────────────────────────────────────────
 
 export const scrubPerson = async (
   store: MembershipStore,
@@ -415,7 +439,7 @@ export const purgeExpiredMemberships = async (
   return purged;
 };
 
-// ── ownership transfer ──────────────────────────────────────────────────────
+// ── ownership transfer ──────────────────────────────────────────────────────────
 
 export class OffboardingError extends Error {
   readonly code: 'not_found' | 'not_active' | 'same_person' | 'last_owner' | 'env_managed_member' | 'confirm_mismatch';
@@ -485,7 +509,7 @@ export const transferOwnership = async (
   return { from: savedFrom, to: savedTo };
 };
 
-// ── export ──────────────────────────────────────────────────────────────────
+// ── export ────────────────────────────────────────────────────────────────
 
 export interface PersonExport {
   exported_at: string;

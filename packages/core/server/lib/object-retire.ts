@@ -38,7 +38,12 @@
  *     something an agent may discard as a side effect; resolve it first.
  */
 import { objectRecordKey } from './object-store-keys.js';
-import { retireObjectRecord, type ObjectRecordWriteStore } from './objects/record-writer.js';
+import {
+  loadRecordWithEtag,
+  retireObjectRecord,
+  RecordWriteConflictError,
+  type ObjectRecordWriteStore,
+} from './objects/record-writer.js';
 import { commitMaterializedFiles, ObjectGitCommitError } from './object-git-committer.js';
 import { materialize } from './materialize.js';
 import { isObjectLockActive, sanitizeObjectLock } from './object-lock.js';
@@ -111,9 +116,9 @@ export const retireObject = async (
     });
   }
 
-  const raw = await store.get(key);
-  if (!raw) return err(404, 'not_found', { error: 'Object record not found', not_found: true });
-  const record = (typeof raw === 'string' ? JSON.parse(raw) : raw) as ObjectRecord;
+  const initial = await loadRecordWithEtag(store, key);
+  if (!initial) return err(404, 'not_found', { error: 'Object record not found', not_found: true });
+  const record = initial.record;
 
   if (record.status === 'archived') {
     // Idempotent: a retried retire reports success rather than failing.
@@ -224,7 +229,33 @@ export const retireObject = async (
   // inventory row are one call through the choke point. Naming the transition
   // is the point — `retireObjectRecord` cannot forget the marker it moved from,
   // which is what `object-purge.ts` later walks.
-  await retireObjectRecord(store, { record: archived, previous_status: 'active', nowMs: ts });
+  //
+  // P1: CAS'd against the etag `archived` was built from — a single
+  // attempt, not retried, since this write follows an already-committed git
+  // export removal derived from `record.body`; retrying would mean
+  // re-deriving `exportPath`/`redirect` against a record that moved. A lost
+  // condition is reported as an honest under-claim (export gone, record not
+  // yet archived) — the caller re-runs retire, idempotent against an
+  // already-removed export.
+  try {
+    await retireObjectRecord(store, {
+      record: archived,
+      previous_status: 'active',
+      nowMs: ts,
+      ...(initial.etag ? { precondition: { kind: 'match' as const, etag: initial.etag } } : {}),
+    });
+  } catch (error) {
+    if (error instanceof RecordWriteConflictError) {
+      return err(409, 'retire_stamp_conflict', {
+        error:
+          'The export was removed but the record could not be marked archived because another writer changed it first. Retry retire — removing an already-removed export is a no-op.',
+        export_removed: exportPath,
+        commit_sha: commit.commitSha,
+        reconciliation: 'retry_retire',
+      });
+    }
+    throw error;
+  }
 
   // Keep the store-backed redirect table in step with the export just committed.
   // Not a record and not part of the inventory projection, so it stays here.

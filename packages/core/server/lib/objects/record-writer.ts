@@ -41,6 +41,15 @@
  *      interrupted write costs the next reader a rebuild rather than a stale
  *      list: an armed document has nothing in it to be stale.
  *   2. **The record blob.** Durable BEFORE anything claims it exists.
+ *
+ *      P1 (2026-09-18): now OPTIONALLY conditional. A caller that knows what
+ *      it read passes `precondition` (`onlyIfNew` for create, `onlyIfMatch`
+ *      for update, against the STORAGE etag — never the JS-level
+ *      `version`/`content_revision` counters `object-verbs.ts` already
+ *      checks). A lost condition throws `RecordWriteConflictError` before
+ *      step 3, so a losing write never reaches the status marker, the index
+ *      row or the visual-identity snapshot. No `precondition` is the
+ *      pre-P1 unconditional write, byte for byte.
  *   3. **The status-index marker** (`objects/<type>/index/by-status/<status>/<id>`),
  *      and, when the status moved, the removal of the marker it moved from.
  *   4. **The derived index row**, compare-and-swapped into `objects/index.json` at
@@ -99,10 +108,15 @@
  * the defect, the fix, and why `seq` alone could not carry it on a runtime
  * whose reads are silently eventual.)
  *
- * A store that cannot report an etag for `objects/index.json` or for
- * `objects/version` (the local file-backed shim; every hand-rolled test fake)
- * never commits at all and simply leaves the alarm up for the sweep, which is
- * precisely the behaviour this repo had before M0.
+ * P1 (2026-09-18): a concurrent writer can now ALSO lose at step 2 itself —
+ * the record write's own condition — which is the race this wave closes. A
+ * losing step 2 disarms both leases taken in step 1 (`disarmRefused`/
+ * `commitVisualIdentitySnapshotEntries` below), exactly as a losing step 4/5
+ * already did, then throws: a REFUSAL, not a partial write, so nothing
+ * downstream runs. A store that cannot report a WriteResult for the record
+ * blob (the local shim pre-fix; every hand-rolled fake) gets no CAS
+ * guarantee here either — same as it always had before M0 — but is not made
+ * worse: see `putObjectRecord`'s conflict handling.
  *
  * ## What this module deliberately does NOT own
  *
@@ -127,7 +141,9 @@ import {
   commitObjectIndexEntries,
   disarmRefused,
   projectIndexEntry,
+  usableEtag,
   type ObjectIndexDocStore,
+  type ObjectIndexWriteLease,
 } from './index-doc.js';
 /**
  * M3.3 — the LEAF spelling, and load bearing that it stays leaf. The same
@@ -158,6 +174,61 @@ export type ObjectRecordWriteStore = ObjectIndexDocStore &
   };
 
 /**
+ * P1 — the ONE conflict shape a caller of this choke point ever needs to
+ * catch. Thrown, not returned, so a caller cannot forget to check a
+ * return-value shape and silently treat a lost write as success. `key` is
+ * the record's blob key; there is no `.etag` — a retry must re-read
+ * (`loadRecordWithEtag`), never reuse a stale token.
+ */
+export class RecordWriteConflictError extends Error {
+  readonly key: string;
+  constructor(key: string) {
+    super(`Object record write conflict for "${key}": another writer changed this record first.`);
+    this.name = 'RecordWriteConflictError';
+    this.key = key;
+  }
+}
+
+/**
+ * The STORAGE-level precondition for `putObjectRecord`/`retireObjectRecord`.
+ * A closed union of exactly the two conditions the real backend offers
+ * (`onlyIfNew`/`onlyIfMatch`) — never the application's `version`/
+ * `content_revision` counters, a separate JS-level check every caller
+ * already makes (`object-verbs.ts`). `etag` is always the caller's OWN read
+ * of THIS record — never minted, never reused across records or retries.
+ */
+export type RecordWritePrecondition = { kind: 'create' } | { kind: 'match'; etag: string };
+
+/**
+ * The ONE place a record is read FOR a write. A caller that will call
+ * `putObjectRecord`/`retireObjectRecord` with a `precondition` must read
+ * through here, not `store.get` — that is what makes the token it carries the
+ * token of the record it actually read.
+ *
+ * A store without `getWithMetadata`, or one that cannot report a usable etag
+ * (the local shim before P1's fix, every hand-rolled fake that predates it),
+ * answers `etag: undefined` — never a fabricated token. A caller then cannot
+ * build a `{kind:'match'}` precondition and must write unconditionally
+ * instead, exactly as it always did.
+ */
+export const loadRecordWithEtag = async (
+  store: ObjectRecordWriteStore,
+  key: string
+): Promise<{ record: ObjectRecord; etag: string | undefined } | undefined> => {
+  if (typeof store.getWithMetadata === 'function') {
+    const result = await store.getWithMetadata(key, { type: 'text' });
+    if (!result) return undefined;
+    const data = result.data;
+    const raw = typeof data === 'string' ? data : data == null ? null : JSON.stringify(data);
+    if (!raw) return undefined;
+    return { record: JSON.parse(raw) as ObjectRecord, etag: usableEtag(result.etag) ? result.etag : undefined };
+  }
+  const raw = await store.get(key);
+  if (!raw) return undefined;
+  return { record: JSON.parse(raw) as ObjectRecord, etag: undefined };
+};
+
+/**
  * M3.3 — the second projection this choke point maintains.
  *
  * `/admin/settings/visual-identity` read the BODIES of four object types over
@@ -174,9 +245,27 @@ const armSnapshotFor = async (
   types: readonly ObjectType[],
   nowMs: number
 ): Promise<VisualIdentitySnapshotLease | undefined> =>
-  types.some((type) => isVisualIdentityObjectType(type))
-    ? armVisualIdentitySnapshotWrite(store, nowMs)
-    : undefined;
+  types.some((type) => isVisualIdentityObjectType(type)) ? armVisualIdentitySnapshotWrite(store, nowMs) : undefined;
+
+/**
+ * P1 — undo an arm that will never see its commit, for BOTH leases, because
+ * the record write itself lost its condition. `disarmRefused` already leaves
+ * `objects/version` armed for the sweep; the snapshot lease gets the cheaper
+ * twin — re-committing its own unchanged `previous` content (an empty
+ * upsert/removal set) DISARMS it immediately instead of leaving it stuck
+ * armed until the next full four-listing rebuild.
+ */
+const disarmBothLeases = async (
+  store: ObjectRecordWriteStore,
+  lease: ObjectIndexWriteLease,
+  snapshotLease: VisualIdentitySnapshotLease | undefined,
+  nowMs: number
+): Promise<void> => {
+  const tasks: Promise<unknown>[] = [];
+  if (lease.armed) tasks.push(disarmRefused(store, lease, nowMs));
+  if (snapshotLease?.armed) tasks.push(commitVisualIdentitySnapshotEntries(store, snapshotLease, { nowMs }));
+  await Promise.all(tasks);
+};
 
 const deleteKey = async (store: ObjectRecordWriteStore, key: string): Promise<void> => {
   const remove = typeof store.delete === 'function' ? store.delete.bind(store) : store.del?.bind(store);
@@ -209,10 +298,21 @@ export type PutObjectRecordResult = {
  * `previous_status` is how a status TRANSITION (retire, restore) tells the choke
  * point which marker to retire; omit it for an ordinary edit, where the marker is
  * simply re-asserted at the status the record already carries.
+ *
+ * `precondition` (P1): when supplied, the record blob write is conditional
+ * (`onlyIfNew` for create, `onlyIfMatch` for update). A lost condition throws
+ * `RecordWriteConflictError` BEFORE the status marker, index row or
+ * visual-identity snapshot are touched, so a losing write never gets
+ * projected. Omitted, the write is unconditional, exactly as before P1.
  */
 export const putObjectRecord = async (
   store: ObjectRecordWriteStore,
-  input: { record: ObjectRecord; previous_status?: ObjectRecordStatus; nowMs?: number }
+  input: {
+    record: ObjectRecord;
+    previous_status?: ObjectRecordStatus;
+    nowMs?: number;
+    precondition?: RecordWritePrecondition;
+  }
 ): Promise<PutObjectRecordResult> => {
   const nowMs = input.nowMs ?? Date.now();
   const record = input.record;
@@ -227,8 +327,29 @@ export const putObjectRecord = async (
     armSnapshotFor(store, [record.object_type], nowMs),
   ]);
 
-  // 2 — the record, durable before anything claims it exists.
-  const written = (await store.setJSON(key, record)) as void | { etag?: string };
+  // 2 — the record, durable before anything claims it exists. P1: optionally
+  // conditional — see the doc comment above and `RecordWriteConflictError`.
+  const setOptions =
+    input.precondition === undefined
+      ? undefined
+      : input.precondition.kind === 'create'
+        ? ({ onlyIfNew: true } as const)
+        : ({ onlyIfMatch: input.precondition.etag } as const);
+  const written = (await store.setJSON(key, record, setOptions)) as void | { modified?: boolean; etag?: string };
+
+  if (input.precondition !== undefined) {
+    const modified = written && typeof written === 'object' ? written.modified : undefined;
+    // A PROVEN refusal (`WriteResult.modified === false`, the real
+    // backend's documented contract) is the one signal this choke point
+    // trusts. Anything else — `true`, or `undefined`/void from a store that
+    // cannot report a `WriteResult` at all (every hand-rolled fake, the
+    // pre-P1 local shim) — is treated as success: the same protection such a
+    // store always had, neither strengthened nor broken by P1.
+    if (modified === false) {
+      await disarmBothLeases(store, lease, snapshotLease, nowMs);
+      throw new RecordWriteConflictError(key);
+    }
+  }
   const etag = written && typeof written === 'object' && typeof written.etag === 'string' ? written.etag : '';
 
   // 3 — the status marker, and the one it moved away from.
@@ -293,6 +414,14 @@ export type ObjectRecordRef = {
  * middle leaves the index claiming a record that is gone — which the verified
  * sweep already handles (it projects from the LISTING, so a key that is not
  * listed simply is not a row).
+ *
+ * P1: `delete` has no conditional form in the real backend (`@netlify/blobs`'s
+ * `Store.delete(key)` takes no options at all) — there is no delete-time CAS to
+ * offer here, and this module will not fake one. `object-purge.ts` is the
+ * caller, and it narrows the real TOCTOU window itself, immediately before
+ * calling this, by re-reading each candidate and dropping any whose status
+ * moved off `'archived'` since the listing walk. That is a mitigation, not a
+ * guarantee — named as a residual gap in P1's memo, not solved here.
  */
 export const deleteObjectRecords = async (
   store: ObjectRecordWriteStore,
@@ -351,10 +480,16 @@ export const deleteObjectRecord = async (
  */
 export const retireObjectRecord = async (
   store: ObjectRecordWriteStore,
-  input: { record: ObjectRecord; previous_status?: ObjectRecordStatus; nowMs?: number }
+  input: {
+    record: ObjectRecord;
+    previous_status?: ObjectRecordStatus;
+    nowMs?: number;
+    precondition?: RecordWritePrecondition;
+  }
 ): Promise<PutObjectRecordResult> =>
   putObjectRecord(store, {
     record: input.record,
     previous_status: input.previous_status ?? 'active',
     ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
+    ...(input.precondition === undefined ? {} : { precondition: input.precondition }),
   });

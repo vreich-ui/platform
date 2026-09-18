@@ -26,17 +26,35 @@
  *
  * Store/JSON failures propagate to the caller; HTTP wrapping (auth, 405, 500)
  * is the verb endpoint's job, exactly as it is for the article lock today.
+ *
+ * P1 (2026-09-18): every mutating verb here is a RESTAMP — reads the record,
+ * recomputes lock metadata as a pure function of what it read, writes back
+ * with a `{kind:'match'}` precondition against that SAME read's etag. None
+ * replays a body edit, so a lost condition (another writer moved the record;
+ * routine here — `blob-store.ts` calls 'strong' consistency effectively
+ * eventual on this runtime) is always safe to resolve by re-reading, bounded
+ * by `MAX_LOCK_WRITE_ATTEMPTS`. No etag at all degrades to the pre-P1
+ * unconditional write — no worse, never better.
  */
 import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
 import type { ObjectRecord, Principal, WorkflowLockRecord } from '../../schema/object-record-v1.js';
-import { putObjectRecord, type ObjectRecordWriteStore } from './objects/record-writer.js';
+import {
+  loadRecordWithEtag,
+  putObjectRecord,
+  RecordWriteConflictError,
+  type ObjectRecordWriteStore,
+  type RecordWritePrecondition,
+} from './objects/record-writer.js';
 import { isObjectLockActive, sanitizeObjectLock } from './object-lock-view.js';
 
 export const DEFAULT_LEASE_SECONDS = 900; // 15 min, matches the article lock default
 export const MAX_LEASE_SECONDS = 3600;
+
+/** P1 — see the module header. Bounds the re-read-and-recompute retry before a genuinely hot key gets a 409 instead of an infinite retry. */
+const MAX_LOCK_WRITE_ATTEMPTS = 5;
 
 const leaseSecondsSchema = z.number().int().positive().max(MAX_LEASE_SECONDS).optional();
 
@@ -50,7 +68,7 @@ export type ObjectLockStore = ObjectRecordWriteStore;
 
 export type ObjectLockResult = {
   ok: boolean;
-  /** HTTP-parity status code (200 | 400 | 404 | 423), identical to the article endpoint. */
+  /** HTTP-parity status code (200 | 400 | 404 | 409 | 423), identical to the article endpoint plus P1's write-conflict 409. */
   status: number;
   /** Response payload, field-for-field identical to admin-workflow-lock's body. */
   body: Record<string, unknown>;
@@ -133,14 +151,55 @@ const result = (status: number, body: Record<string, unknown>, record?: ObjectRe
 
 const notFound = () => result(404, { error: 'Object record not found', not_found: true });
 
+const tooManyConflicts = (action: string) =>
+  result(409, {
+    error: 'Too many concurrent writers to this record; retry the request.',
+    action,
+    write_conflict: true,
+  });
+
 const invalidLease = (leaseSeconds: number | undefined): ObjectLockResult | undefined => {
   const parsed = leaseSecondsSchema.safeParse(leaseSeconds);
   return parsed.success ? undefined : result(400, { error: 'Invalid request', issues: parsed.error.issues });
 };
 
-const loadRecord = async (store: ObjectLockStore, recordKey: string): Promise<ObjectRecord | undefined> => {
-  const raw = await store.get(recordKey);
-  return raw ? (JSON.parse(raw) as ObjectRecord) : undefined;
+/** P1: `undefined` etag means "this store cannot condition on it" — the caller then writes unconditionally, exactly as before P1. */
+const matchPrecondition = (etag: string | undefined): RecordWritePrecondition | undefined =>
+  etag ? { kind: 'match', etag } : undefined;
+
+/**
+ * Attempt a restamp write and tell the caller whether to retry. `build`
+ * receives the FRESH record just read and returns either an early result (no
+ * write needed — not-found, a guard failure, an idempotent no-op) or the next
+ * record to persist; this function owns the read/write/retry loop so every
+ * verb below states only its own transition, never the concurrency handling.
+ */
+const restamp = async (
+  store: ObjectLockStore,
+  recordKey: string,
+  action: string,
+  build: (
+    record: ObjectRecord
+  ) => { early: ObjectLockResult } | { next: ObjectRecord; onSuccess: (r: ObjectRecord) => ObjectLockResult }
+): Promise<ObjectLockResult> => {
+  for (let attempt = 0; attempt < MAX_LOCK_WRITE_ATTEMPTS; attempt++) {
+    const current = await loadRecordWithEtag(store, recordKey);
+    if (!current) return notFound();
+    const decision = build(current.record);
+    if ('early' in decision) return decision.early;
+    try {
+      await putObjectRecord(store, {
+        record: decision.next,
+        precondition: matchPrecondition(current.etag),
+      });
+      return decision.onSuccess(decision.next);
+    } catch (error) {
+      if (!(error instanceof RecordWriteConflictError)) throw error;
+      // Another writer moved this record between our read and our write.
+      // Loop: re-read and let `build` re-derive from the current truth.
+    }
+  }
+  return tooManyConflicts(action);
 };
 
 /**
@@ -172,43 +231,44 @@ export const checkoutObjectLock = async (
   const invalid = invalidLease(options.leaseSeconds);
   if (invalid) return invalid;
 
-  const record = await loadRecord(store, recordKey);
-  if (!record) return notFound();
-
   const ts = options.nowMs ?? Date.now();
   const timestamp = nowIso(ts);
 
-  if (isObjectLockActive(record.lock, ts)) {
-    return result(423, { action: 'checkout', locked: true, lock: sanitizeObjectLock(record.lock) });
-  }
+  return restamp(store, recordKey, 'checkout', (record) => {
+    if (isObjectLockActive(record.lock, ts)) {
+      return { early: result(423, { action: 'checkout', locked: true, lock: sanitizeObjectLock(record.lock) }) };
+    }
 
-  const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
-  const owner = lockOwnerFromPrincipal(options.actor);
-  const lock: WorkflowLockRecord = {
-    token: randomUUID(),
-    owner_id: owner.owner_id,
-    owner_label: owner.owner_label,
-    acquired_at: timestamp,
-    expires_at: addSecondsIso(ts, lease),
-  };
-  const nextRecord: ObjectRecord = {
-    ...record,
-    updated_at: timestamp,
-    lock,
-    history: [
-      ...record.history,
-      {
-        at: timestamp,
-        action: 'checkout',
-        actor: options.actor,
-        details: { owner_id: owner.owner_id, owner_label: owner.owner_label, lease_seconds: lease },
-      },
-    ],
-    version: record.version + 1,
-  };
-
-  await putObjectRecord(store, { record: nextRecord, nowMs: ts });
-  return result(200, { action: 'checkout', lockToken: lock.token, lock: sanitizeObjectLock(lock) }, nextRecord);
+    const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
+    const owner = lockOwnerFromPrincipal(options.actor);
+    const lock: WorkflowLockRecord = {
+      token: randomUUID(),
+      owner_id: owner.owner_id,
+      owner_label: owner.owner_label,
+      acquired_at: timestamp,
+      expires_at: addSecondsIso(ts, lease),
+    };
+    const next: ObjectRecord = {
+      ...record,
+      updated_at: timestamp,
+      lock,
+      history: [
+        ...record.history,
+        {
+          at: timestamp,
+          action: 'checkout',
+          actor: options.actor,
+          details: { owner_id: owner.owner_id, owner_label: owner.owner_label, lease_seconds: lease },
+        },
+      ],
+      version: record.version + 1,
+    };
+    return {
+      next,
+      onSuccess: (nextRecord) =>
+        result(200, { action: 'checkout', lockToken: lock.token, lock: sanitizeObjectLock(lock) }, nextRecord),
+    };
+  });
 };
 
 export const checkinObjectLock = async (
@@ -216,33 +276,30 @@ export const checkinObjectLock = async (
   recordKey: string,
   options: ObjectLockCheckinOptions
 ): Promise<ObjectLockResult> => {
-  const record = await loadRecord(store, recordKey);
-  if (!record) return notFound();
-
   const ts = options.nowMs ?? Date.now();
   const timestamp = nowIso(ts);
 
-  const guard = guardHeldLock(record, 'checkin', options.lockToken, ts);
-  if ('early' in guard) return guard.early;
+  return restamp(store, recordKey, 'checkin', (record) => {
+    const guard = guardHeldLock(record, 'checkin', options.lockToken, ts);
+    if ('early' in guard) return { early: guard.early };
 
-  const nextRecord: ObjectRecord = {
-    ...record,
-    updated_at: timestamp,
-    lock: undefined,
-    history: [
-      ...record.history,
-      {
-        at: timestamp,
-        action: 'checkin',
-        actor: options.actor,
-        details: { owner_id: guard.held.owner_id, owner_label: guard.held.owner_label },
-      },
-    ],
-    version: record.version + 1,
-  };
-
-  await putObjectRecord(store, { record: nextRecord, nowMs: ts });
-  return result(200, { action: 'checkin', checked_in: true }, nextRecord);
+    const next: ObjectRecord = {
+      ...record,
+      updated_at: timestamp,
+      lock: undefined,
+      history: [
+        ...record.history,
+        {
+          at: timestamp,
+          action: 'checkin',
+          actor: options.actor,
+          details: { owner_id: guard.held.owner_id, owner_label: guard.held.owner_label },
+        },
+      ],
+      version: record.version + 1,
+    };
+    return { next, onSuccess: () => result(200, { action: 'checkin', checked_in: true }, next) };
+  });
 };
 
 export const refreshObjectLock = async (
@@ -253,48 +310,45 @@ export const refreshObjectLock = async (
   const invalid = invalidLease(options.leaseSeconds);
   if (invalid) return invalid;
 
-  const record = await loadRecord(store, recordKey);
-  if (!record) return notFound();
-
   const ts = options.nowMs ?? Date.now();
   const timestamp = nowIso(ts);
 
-  const guard = guardHeldLock(record, 'refresh', options.lockToken, ts);
-  if ('early' in guard) return guard.early;
+  return restamp(store, recordKey, 'refresh', (record) => {
+    const guard = guardHeldLock(record, 'refresh', options.lockToken, ts);
+    if ('early' in guard) return { early: guard.early };
 
-  const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
-  // Parity: the article lock extends from the current expiry, not from now.
-  // `extendFrom: 'now'` opts into the bounded sliding window instead (see the
-  // option's doc comment) and can only ever move the expiry later.
-  const heldExpiresAtMs = Date.parse(guard.held.expires_at);
-  const nextExpiresAtMs =
-    options.extendFrom === 'now' ? Math.max(ts + lease * 1000, heldExpiresAtMs) : heldExpiresAtMs + lease * 1000;
-  const lock: WorkflowLockRecord = {
-    ...guard.held,
-    expires_at: nowIso(nextExpiresAtMs),
-  };
-  const nextRecord: ObjectRecord = {
-    ...record,
-    updated_at: timestamp,
-    lock,
-    history: [
-      ...record.history,
-      {
-        at: timestamp,
-        action: 'refresh',
-        actor: options.actor,
-        details: {
-          owner_id: guard.held.owner_id,
-          lease_seconds: lease,
-          ...(options.reason ? { reason: options.reason } : {}),
+    const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
+    // Parity: the article lock extends from the current expiry, not from now.
+    // `extendFrom: 'now'` opts into the bounded sliding window instead (see the
+    // option's doc comment) and can only ever move the expiry later.
+    const heldExpiresAtMs = Date.parse(guard.held.expires_at);
+    const nextExpiresAtMs =
+      options.extendFrom === 'now' ? Math.max(ts + lease * 1000, heldExpiresAtMs) : heldExpiresAtMs + lease * 1000;
+    const lock: WorkflowLockRecord = {
+      ...guard.held,
+      expires_at: nowIso(nextExpiresAtMs),
+    };
+    const next: ObjectRecord = {
+      ...record,
+      updated_at: timestamp,
+      lock,
+      history: [
+        ...record.history,
+        {
+          at: timestamp,
+          action: 'refresh',
+          actor: options.actor,
+          details: {
+            owner_id: guard.held.owner_id,
+            lease_seconds: lease,
+            ...(options.reason ? { reason: options.reason } : {}),
+          },
         },
-      },
-    ],
-    version: record.version + 1,
-  };
-
-  await putObjectRecord(store, { record: nextRecord, nowMs: ts });
-  return result(200, { action: 'refresh', lock: sanitizeObjectLock(lock) }, nextRecord);
+      ],
+      version: record.version + 1,
+    };
+    return { next, onSuccess: () => result(200, { action: 'refresh', lock: sanitizeObjectLock(lock) }, next) };
+  });
 };
 
 export const objectLockStatus = async (
@@ -302,8 +356,9 @@ export const objectLockStatus = async (
   recordKey: string,
   options: { nowMs?: number } = {}
 ): Promise<ObjectLockResult> => {
-  const record = await loadRecord(store, recordKey);
-  if (!record) return notFound();
+  const current = await loadRecordWithEtag(store, recordKey);
+  if (!current) return notFound();
+  const { record } = current;
 
   return result(200, {
     action: 'status',
@@ -318,34 +373,34 @@ export const forceReleaseObjectLock = async (
   recordKey: string,
   options: ObjectLockForceReleaseOptions
 ): Promise<ObjectLockResult> => {
-  const record = await loadRecord(store, recordKey);
-  if (!record) return notFound();
-
-  if (!record.lock) return result(200, { action: 'force_release', idempotent: true, message: 'No lock was held' });
-
   const ts = options.nowMs ?? Date.now();
   const timestamp = nowIso(ts);
-  const owner = lockOwnerFromPrincipal(options.actor);
-  const nextRecord: ObjectRecord = {
-    ...record,
-    updated_at: timestamp,
-    lock: undefined,
-    history: [
-      ...record.history,
-      {
-        at: timestamp,
-        action: 'force_release',
-        actor: options.actor,
-        details: {
-          forced_by: owner.owner_id,
-          previous_owner_id: record.lock.owner_id,
-          previous_owner_label: record.lock.owner_label,
-        },
-      },
-    ],
-    version: record.version + 1,
-  };
 
-  await putObjectRecord(store, { record: nextRecord, nowMs: ts });
-  return result(200, { action: 'force_release', released: true }, nextRecord);
+  return restamp(store, recordKey, 'force_release', (record) => {
+    if (!record.lock) {
+      return { early: result(200, { action: 'force_release', idempotent: true, message: 'No lock was held' }) };
+    }
+
+    const owner = lockOwnerFromPrincipal(options.actor);
+    const next: ObjectRecord = {
+      ...record,
+      updated_at: timestamp,
+      lock: undefined,
+      history: [
+        ...record.history,
+        {
+          at: timestamp,
+          action: 'force_release',
+          actor: options.actor,
+          details: {
+            forced_by: owner.owner_id,
+            previous_owner_id: record.lock.owner_id,
+            previous_owner_label: record.lock.owner_label,
+          },
+        },
+      ],
+      version: record.version + 1,
+    };
+    return { next, onSuccess: () => result(200, { action: 'force_release', released: true }, next) };
+  });
 };
