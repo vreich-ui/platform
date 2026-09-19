@@ -62,7 +62,7 @@ import {
 } from './object-git-committer.js';
 import { isObjectLockActive, sanitizeObjectLock, type ObjectLockStore } from './object-lock.js';
 import { objectRecordKey } from './object-store-keys.js';
-import { putObjectRecord } from './objects/record-writer.js';
+import { loadRecordWithEtag, putObjectRecord, RecordWriteConflictError } from './objects/record-writer.js';
 import { refreshReleaseSnapshotAfterWrite, type ReleaseSnapshotStore } from './release/snapshot-store.js';
 import { summarizeValidation, validateObject, type ObjectValidationContext } from './object-validate.js';
 import type {
@@ -224,7 +224,7 @@ export const publishObject = async (
   // committed .md posts and is untouched by this operation.
   const objectType = input.object_type as MaterializableObjectType;
 
-  // ── scheduling gate: immediate-or-reject (OQ-2 deferred) ──────────────────
+  // ── scheduling gate: immediate-or-reject (OQ-2 deferred) ───────────────────────
   if (input.published_time === null) {
     return err(400, 'unpublish_not_supported', {
       error:
@@ -255,7 +255,7 @@ export const publishObject = async (
     return err(409, 'archived', { error: 'Archived objects cannot be published.' });
   }
 
-  // ── D§5.6 step 1: the caller must hold the live lock (verbs parity) ──────
+  // ── D§5.6 step 1: the caller must hold the live lock (verbs parity) ─────
   if (!record.lock || record.lock.token !== input.lock_token || !isObjectLockActive(record.lock, ts)) {
     return err(423, 'lock_required', {
       error: 'Lock required',
@@ -283,7 +283,7 @@ export const publishObject = async (
     });
   }
 
-  // ── D§5.6 step 3: materialize (pure; record untouched on failure) ─────────
+  // ── D§5.6 step 3: materialize (pure; record untouched on failure) ─────
   // Marker inputs are deliberately stable across retries: `at` is the
   // effective published_time (never wall-clock) and record_version is the
   // version we loaded — same inputs, same bytes (T1.1), which is what lets
@@ -350,75 +350,114 @@ export const publishObject = async (
     publishProvenance(input)
   );
 
-  // ── D§5.6 step 5: single stamp+receipt write, only after the commit ───────
+  // ── D§5.6 step 5: single stamp+receipt write, only after the commit ─────
   // Reload so the write is based on the freshest envelope (lock heartbeats
   // etc. may have bumped `version` while the commit ran) and so body drift
   // is detectable rather than silently stamped over.
-  const fresh = await loadRecord(store, key);
-  if (!fresh) {
-    return err(500, 'stamp_failed_export_committed', {
-      error: 'The export is committed but the record vanished before it could be stamped.',
-      export_committed: true,
-      receipt,
-      reconciliation: 'retry_publish',
-    });
-  }
-  if (fresh.content_revision !== contentRevisionAtMaterialize) {
-    return err(409, 'content_changed_during_publish', {
-      error:
-        'The body changed while the export was being committed; the record was NOT stamped. The committed export reflects the older content — re-run publish to export and stamp the current content.',
-      export_committed: true,
-      receipt,
-      materialized_content_revision: contentRevisionAtMaterialize,
-      actual_content_revision: fresh.content_revision,
-      reconciliation: 'retry_publish',
-    });
-  }
+  //
+  // P1 (2026-09-18): the stamp write is CAS'd against THIS read's etag, and
+  // a lost condition is RETRIED — re-read, re-check `content_revision`,
+  // re-stamp — rather than surfaced as a bare 409/500: `blob-store.ts` calls
+  // this runtime's 'strong' consistency effectively eventual, so a lock
+  // heartbeat landing between reload and stamp is routine, not exceptional,
+  // and must not turn a successful publish into a reported failure. A
+  // genuine BODY change (`content_revision` moved) is still never retried —
+  // `content_changed_during_publish`, exactly as before.
+  const MAX_STAMP_ATTEMPTS = 5;
+  let fresh: ObjectRecord | undefined;
+  let stamped: ObjectRecord | undefined;
+  for (let attempt = 0; attempt < MAX_STAMP_ATTEMPTS; attempt++) {
+    const current = await loadRecordWithEtag(store, key);
+    if (!current) {
+      return err(500, 'stamp_failed_export_committed', {
+        error: 'The export is committed but the record vanished before it could be stamped.',
+        export_committed: true,
+        receipt,
+        reconciliation: 'retry_publish',
+      });
+    }
+    fresh = current.record;
+    if (fresh.content_revision !== contentRevisionAtMaterialize) {
+      return err(409, 'content_changed_during_publish', {
+        error:
+          'The body changed while the export was being committed; the record was NOT stamped. The committed export reflects the older content — re-run publish to export and stamp the current content.',
+        export_committed: true,
+        receipt,
+        materialized_content_revision: contentRevisionAtMaterialize,
+        actual_content_revision: fresh.content_revision,
+        reconciliation: 'retry_publish',
+      });
+    }
 
-  const stampedAt = new Date(ts).toISOString();
-  const stamped: ObjectRecord = {
-    ...fresh,
-    updated_at: stampedAt,
-    publication: {
-      ...fresh.publication,
-      published_time: effectivePublishedTime,
-      publish_receipt: receipt,
-    },
-    history: [
-      ...fresh.history,
-      {
-        at: stampedAt,
-        action: 'publish',
-        actor: input.actor,
-        details: {
-          published_time: effectivePublishedTime,
-          commit_sha: receipt.commit_sha,
-          no_op: receipt.no_op,
-          files: receipt.files,
-          ...(input.producer ? { producer: input.producer } : {}),
-        },
+    const stampedAt = new Date(ts).toISOString();
+    stamped = {
+      ...fresh,
+      updated_at: stampedAt,
+      publication: {
+        ...fresh.publication,
+        published_time: effectivePublishedTime,
+        publish_receipt: receipt,
       },
-    ],
-    version: fresh.version + 1,
-    // content_revision deliberately untouched: the stamp must never
-    // invalidate the approval it consumes (D§3.1/D§5.6).
-    content_revision: fresh.content_revision,
-  };
+      history: [
+        ...fresh.history,
+        {
+          at: stampedAt,
+          action: 'publish',
+          actor: input.actor,
+          details: {
+            published_time: effectivePublishedTime,
+            commit_sha: receipt.commit_sha,
+            no_op: receipt.no_op,
+            files: receipt.files,
+            ...(input.producer ? { producer: input.producer } : {}),
+          },
+        },
+      ],
+      version: fresh.version + 1,
+      // content_revision deliberately untouched: the stamp must never
+      // invalidate the approval it consumes (D§3.1/D§5.6).
+      content_revision: fresh.content_revision,
+    };
 
-  try {
-    // M0.1: the stamp goes through the record-write choke point, so the
-    // inventory row that says "published" is written by the same call that
-    // makes it true (`objects/record-writer.ts`).
-    await putObjectRecord(store, { record: stamped, nowMs: ts });
-  } catch (error) {
-    return err(500, 'stamp_failed_export_committed', {
-      error:
-        'The export is committed and live, but the publish stamp could not be written; the record under-claims. Retry the publish with the same published_time — it will no-op the commit and complete the stamp.',
-      export_committed: true,
-      receipt,
-      detail: error instanceof Error ? error.message : String(error),
-      reconciliation: 'retry_publish',
-    });
+    try {
+      // M0.1: the stamp goes through the record-write choke point, so the
+      // inventory row that says "published" is written by the same call that
+      // makes it true (`objects/record-writer.ts`).
+      await putObjectRecord(store, {
+        record: stamped,
+        nowMs: ts,
+        ...(current.etag ? { precondition: { kind: 'match' as const, etag: current.etag } } : {}),
+      });
+      break;
+    } catch (error) {
+      if (error instanceof RecordWriteConflictError) {
+        if (attempt === MAX_STAMP_ATTEMPTS - 1) {
+          return err(500, 'stamp_failed_export_committed', {
+            error:
+              'The export is committed and live, but the publish stamp lost too many concurrent write races to land. Retry the publish with the same published_time — it will no-op the commit and complete the stamp.',
+            export_committed: true,
+            receipt,
+            reconciliation: 'retry_publish',
+          });
+        }
+        continue; // routine race — re-read and retry, see the note above.
+      }
+      return err(500, 'stamp_failed_export_committed', {
+        error:
+          'The export is committed and live, but the publish stamp could not be written; the record under-claims. Retry the publish with the same published_time — it will no-op the commit and complete the stamp.',
+        export_committed: true,
+        receipt,
+        detail: error instanceof Error ? error.message : String(error),
+        reconciliation: 'retry_publish',
+      });
+    }
+  }
+  if (!fresh || !stamped) {
+    // Unreachable: the loop above only exits via an early `return` or a
+    // successful `break`, and `break` runs only after both are assigned.
+    // Stated as a thrown invariant, not a silent `!`, so a future edit that
+    // breaks this shape fails loudly instead of stamping `undefined`.
+    throw new Error('publishObject: stamp loop exited without a record — this is a bug, not a runtime condition.');
   }
 
   /**
@@ -445,7 +484,7 @@ export const publishObject = async (
     carryDeploy: true,
   });
 
-  // ── KI-08: the annotation layer reaches the SINK, from the STORE ─────────
+  // ── KI-08: the annotation layer reaches the SINK, from the STORE ─────
   // AFTER the stamp, deliberately. The export this publish just committed is
   // stripped of every `private` block — that strip is a security seam and stays
   // — so the strategy/intent labels can only come from `fresh.body`, which is

@@ -130,7 +130,52 @@ export const purgeArchivedObjects = async (
     }
   }
 
-  await deleteObjectRecords(store, toDelete, { nowMs: now });
+  /**
+   * P1 — narrow the TOCTOU window `deleteObjectRecords` cannot close itself
+   * (`@netlify/blobs`'s `delete(key)` takes no condition at all — no
+   * delete-time CAS to offer). The listing walk above can take a while over
+   * a large archive, so re-read every candidate's CURRENT status right
+   * before the batch commits and drop any that moved off `'archived'`
+   * (restored, or already purged by a concurrent run). A mitigation, not a
+   * guarantee — a record can still move in the gap between this re-check and
+   * the delete; a real fix needs delete-time fencing this backend lacks.
+   */
+  const reverified: ObjectRecordRef[] = [];
+  for (const ref of toDelete) {
+    const recordKey = objectRecordKey(ref.object_type, ref.object_id);
+    let raw: string | null;
+    try {
+      raw = await store.get(recordKey);
+    } catch {
+      // Unreadable now: leave it for the next sweep rather than guessing.
+      continue;
+    }
+    if (!raw) {
+      // Still gone — the stale-index-pointer case from the walk above.
+      reverified.push(ref);
+      continue;
+    }
+    let record: ObjectRecord;
+    try {
+      record = JSON.parse(raw) as ObjectRecord;
+    } catch {
+      continue;
+    }
+    if (record.status === 'archived') reverified.push(ref);
+    // else: restored (or otherwise moved) since the walk — never delete it.
+  }
 
-  return { purged, retained, dry_run: dryRun, grace_days: graceDays };
+  await deleteObjectRecords(store, reverified, { nowMs: now });
+
+  // P1: the re-verification above can drop a ref the walk had already added
+  // to `purged` (a genuine, if rare, race). Report only what was actually
+  // handed to `deleteObjectRecords` — never claim a record was purged when
+  // it was dropped and left in place. Skipped in dry-run, where nothing was
+  // ever queued for deletion and `reverified` is always empty by construction.
+  const confirmedKeys = new Set(reverified.map((ref) => objectRecordKey(ref.object_type, ref.object_id)));
+  const confirmedPurged = dryRun
+    ? purged
+    : purged.filter((entry) => confirmedKeys.has(objectRecordKey(entry.object_type, entry.object_id)));
+
+  return { purged: confirmedPurged, retained, dry_run: dryRun, grace_days: graceDays };
 };

@@ -45,7 +45,7 @@ import {
 import type { Role } from './roles.js';
 import { objectRecordKey, objectStatusIndexPrefix } from './object-store-keys.js';
 import { readInventoryRows } from './objects/index-store.js';
-import { putObjectRecord } from './objects/record-writer.js';
+import { loadRecordWithEtag, putObjectRecord, RecordWriteConflictError } from './objects/record-writer.js';
 import { sweepSearchDocs } from './objects/search-index-store.js';
 import { DEFAULT_LIMIT as SEARCH_DEFAULT_LIMIT, rankSearchDocs } from '../../lib/search/content-search.js';
 import { DEFAULT_SEARCH_TYPES } from '../../lib/search/search-doc.js';
@@ -873,7 +873,9 @@ export const seedForCreate = (objectType: ObjectType, body: unknown, site: strin
     const kind = isRecord(body) ? body.kind : undefined;
     if (kind !== 'template') return visualStandardSeed(site);
     const slugHint = isRecord(body)
-      ? [body.templateSlug, body.label].find((value): value is string => typeof value === 'string' && value.trim() !== '')
+      ? [body.templateSlug, body.label].find(
+          (value): value is string => typeof value === 'string' && value.trim() !== ''
+        )
       : undefined;
     return visualStandardSeed(site, slugHint ?? '');
   }
@@ -1496,7 +1498,21 @@ const dispatchObjectVerb = async (
       // M0.1: the record, its status marker and its inventory row are one
       // write through the choke point — see `objects/record-writer.ts` for the
       // order and for what each interruption leaves behind.
-      await putObjectRecord(store, { record, nowMs: ts });
+      //
+      // P1: the `store.get(key)` check above is a cheap fast path, not the
+      // guarantee — two concurrent creates of the same minted id can both
+      // pass it. The `onlyIfNew` precondition is the real create-if-absent
+      // primitive: the loser's write never happens, so it can never
+      // overwrite the winner's record with its own, and it never reaches the
+      // status marker, index row or visual-identity snapshot either.
+      try {
+        await putObjectRecord(store, { record, nowMs: ts, precondition: { kind: 'create' } });
+      } catch (error) {
+        if (error instanceof RecordWriteConflictError) {
+          return err(409, { error: 'Object already exists', object_id: objectIdValue });
+        }
+        throw error;
+      }
       return ok({ record });
     }
 
@@ -1673,7 +1689,10 @@ const dispatchObjectVerb = async (
           objectIdValue = request.requested_id;
         } else {
           try {
-            objectIdValue = mintId({ kind: 'object', objectType: 'page' }, seedForCreate('page', built.body, request.site));
+            objectIdValue = mintId(
+              { kind: 'object', objectType: 'page' },
+              seedForCreate('page', built.body, request.site)
+            );
           } catch (error) {
             if (error instanceof MintIdError)
               return err(400, { error: 'Could not mint an object id', detail: error.message });
@@ -2036,10 +2055,12 @@ const dispatchObjectVerb = async (
       // "Visual standard not found" — technically true, and useless. Object
       // ids are self-describing by prefix (object-ids.ts), so say which
       // parameter the id it actually passed belongs in.
-      const slotMismatch = ([
-        ['visual_standard', 'visual_standard_id', request.visual_standard_id],
-        ['theme', 'theme_id', request.theme_id],
-      ] as const)
+      const slotMismatch = (
+        [
+          ['visual_standard', 'visual_standard_id', request.visual_standard_id],
+          ['theme', 'theme_id', request.theme_id],
+        ] as const
+      )
         .map(([expectedType, parameter, value]) => {
           if (value === undefined) return undefined;
           const actualType = objectTypeFromId(value);
@@ -2368,8 +2389,9 @@ const dispatchObjectVerb = async (
 
     case 'patch': {
       const key = objectRecordKey(request.object_type, request.object_id);
-      const record = await loadRecord(store, key);
-      if (!record) return err(404, { error: 'Object record not found', not_found: true });
+      const current = await loadRecordWithEtag(store, key);
+      if (!current) return err(404, { error: 'Object record not found', not_found: true });
+      const record = current.record;
 
       // Lock precondition (423): you must hold the live lock to mutate.
       if (!record.lock || record.lock.token !== request.lock_token || !isObjectLockActive(record.lock, ts)) {
@@ -2484,7 +2506,29 @@ const dispatchObjectVerb = async (
         });
       }
 
-      await putObjectRecord(store, { record: appliedRecord, nowMs: ts });
+      // P1: storage-level CAS against the etag THIS call read, backing up
+      // the JS-level `expected_record_version` check above. A lost condition
+      // means another writer landed between our read and our write despite
+      // that check passing — never blindly retried (this ops array was
+      // computed against `record`, which is no longer current), surfaced as
+      // the same 409 shape so a caller re-fetches and resubmits.
+      try {
+        await putObjectRecord(store, {
+          record: appliedRecord,
+          nowMs: ts,
+          ...(current.etag ? { precondition: { kind: 'match' as const, etag: current.etag } } : {}),
+        });
+      } catch (error) {
+        if (error instanceof RecordWriteConflictError) {
+          return err(409, {
+            error: 'Record version conflict',
+            expected_record_version: request.expected_record_version,
+            write_conflict: true,
+            minted,
+          });
+        }
+        throw error;
+      }
 
       // Ship the trail ONLY now that the save it describes has actually
       // persisted — atomic with the save (one call from the caller, not a
@@ -2541,7 +2585,11 @@ const dispatchObjectVerb = async (
         content_revision: appliedRecord.content_revision,
         minted,
         validation_summary: impactWarning
-          ? { ...summary, level: summary.level === 'ready' ? 'warning' : summary.level, warnings: [...summary.warnings, impactWarning] }
+          ? {
+              ...summary,
+              level: summary.level === 'ready' ? 'warning' : summary.level,
+              warnings: [...summary.warnings, impactWarning],
+            }
           : summary,
         ...(impact ? { impact } : {}),
       });
@@ -2672,8 +2720,9 @@ const dispatchObjectVerb = async (
 
     case 'submit_review': {
       const key = objectRecordKey(request.object_type, request.object_id);
-      const record = await loadRecord(store, key);
-      if (!record) return err(404, { error: 'Object record not found', not_found: true });
+      const current = await loadRecordWithEtag(store, key);
+      if (!current) return err(404, { error: 'Object record not found', not_found: true });
+      const record = current.record;
       if (!record.lock || record.lock.token !== request.lock_token || !isObjectLockActive(record.lock, ts)) {
         return err(423, { error: 'Lock required', locked: true, lock: sanitizeObjectLock(record.lock) });
       }
@@ -2686,14 +2735,30 @@ const dispatchObjectVerb = async (
       });
       if (!result.ok) return err(result.status, result.body);
 
-      await putObjectRecord(store, { record: result.record, nowMs: ts });
+      // P1: CAS against the etag this call read — `submitReview`'s decision
+      // was computed from `record` and must not be applied on top of a
+      // record that moved since; a lost condition surfaces as a conflict for
+      // the caller to re-fetch and retry, never a blind reapply.
+      try {
+        await putObjectRecord(store, {
+          record: result.record,
+          nowMs: ts,
+          ...(current.etag ? { precondition: { kind: 'match' as const, etag: current.etag } } : {}),
+        });
+      } catch (error) {
+        if (error instanceof RecordWriteConflictError) {
+          return err(409, { error: 'Record changed concurrently; re-fetch and retry.', write_conflict: true });
+        }
+        throw error;
+      }
       return ok({ ...result.body, version: result.record.version, content_revision: result.record.content_revision });
     }
 
     case 'review_decide': {
       const key = objectRecordKey(request.object_type, request.object_id);
-      const record = await loadRecord(store, key);
-      if (!record) return err(404, { error: 'Object record not found', not_found: true });
+      const current = await loadRecordWithEtag(store, key);
+      if (!current) return err(404, { error: 'Object record not found', not_found: true });
+      const record = current.record;
 
       const result = decideReview(record, {
         actor: principal,
@@ -2706,14 +2771,29 @@ const dispatchObjectVerb = async (
       });
       if (!result.ok) return err(result.status, result.body);
 
-      await putObjectRecord(store, { record: result.record, nowMs: ts });
+      // P1: same CAS-before-success discipline as submit_review — a decision
+      // computed against `record` must not land on top of a record that
+      // moved since it was read.
+      try {
+        await putObjectRecord(store, {
+          record: result.record,
+          nowMs: ts,
+          ...(current.etag ? { precondition: { kind: 'match' as const, etag: current.etag } } : {}),
+        });
+      } catch (error) {
+        if (error instanceof RecordWriteConflictError) {
+          return err(409, { error: 'Record changed concurrently; re-fetch and retry.', write_conflict: true });
+        }
+        throw error;
+      }
       return ok({ ...result.body, version: result.record.version, content_revision: result.record.content_revision });
     }
 
     case 'discard': {
       const key = objectRecordKey(request.object_type, request.object_id);
-      const record = await loadRecord(store, key);
-      if (!record) return err(404, { error: 'Object record not found', not_found: true });
+      const current = await loadRecordWithEtag(store, key);
+      if (!current) return err(404, { error: 'Object record not found', not_found: true });
+      const record = current.record;
       if (!record.lock || record.lock.token !== request.lock_token || !isObjectLockActive(record.lock, ts)) {
         return err(423, { error: 'Lock required', locked: true, lock: sanitizeObjectLock(record.lock) });
       }
@@ -2721,7 +2801,19 @@ const dispatchObjectVerb = async (
       const result = discardProposal(record, { entries: request.entries, actor: principal, at: timestamp });
       if (!result.ok) return err(result.status, result.body);
 
-      await putObjectRecord(store, { record: result.record, nowMs: ts });
+      // P1: same CAS-before-success discipline as submit_review/review_decide.
+      try {
+        await putObjectRecord(store, {
+          record: result.record,
+          nowMs: ts,
+          ...(current.etag ? { precondition: { kind: 'match' as const, etag: current.etag } } : {}),
+        });
+      } catch (error) {
+        if (error instanceof RecordWriteConflictError) {
+          return err(409, { error: 'Record changed concurrently; re-fetch and retry.', write_conflict: true });
+        }
+        throw error;
+      }
       return ok({ ...result.body, version: result.record.version, content_revision: result.record.content_revision });
     }
 

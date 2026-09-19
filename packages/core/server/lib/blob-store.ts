@@ -3,7 +3,15 @@ import { createLocalBlobStore, type LocalBlobStore } from './local-blobs.js';
 import { pdfToolStorageStores } from './pdf-tool-storage-grant.js';
 
 type BlobMetadata = Record<string, string>;
-type BlobSetOptions = { metadata?: BlobMetadata; onlyIfNew?: boolean };
+/**
+ * P1 (2026-09-18): widened to carry `onlyIfMatch` alongside the pre-existing
+ * `onlyIfNew` — the real `@netlify/blobs` `Store.setJSON`/`set` have always
+ * accepted it (this repo's own ambient `@netlify/blobs` type declaration,
+ * `packages/core/netlify-blobs.d.ts`, had simply drifted from the installed
+ * package and never declared it), and `local-blobs.ts`'s fallback now
+ * genuinely honours it too. Purely additive.
+ */
+type BlobSetOptions = { metadata?: BlobMetadata; onlyIfNew?: boolean; onlyIfMatch?: string };
 
 type BlobStoreValue = string | Buffer | Uint8Array;
 

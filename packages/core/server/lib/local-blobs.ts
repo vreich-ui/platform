@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 
@@ -47,15 +48,22 @@ export type LocalBlobValue = string | Buffer | Uint8Array | ArrayBuffer;
 
 export type LocalBlobMetadata = Record<string, string>;
 
-// Matches blob-store.ts's BlobSetOptions (metadata + onlyIfNew) — some consumers (e.g.
-// order-reissue.ts) declare their own narrower local `Store` type expecting `onlyIfNew` on
-// set/setJSON options, so this shape has to be a superset of every such option bag rather
-// than just the fields the local fallback itself acts on. `onlyIfNew` is accepted but not
-// enforced here (this fallback exists for local dev/tests, not production correctness).
-export type LocalBlobSetOptions = { metadata?: LocalBlobMetadata; onlyIfNew?: boolean };
+// Matches blob-store.ts's BlobSetOptions (metadata + onlyIfNew/onlyIfMatch).
+//
+// P1 (2026-09-18): before this pin, `onlyIfNew` was accepted but not
+// enforced and `onlyIfMatch` did not exist — every test/dev run against
+// this shim got NO concurrency protection, silently. Both are now honoured:
+// a real content-hash etag is computed on every read AND write (never
+// persisted, so an existing on-disk blob is already correct — no
+// migration), and `set`/`setJSON` refuse a failed condition exactly as
+// `@netlify/blobs` does (`{modified:false}`, no write).
+export type LocalBlobSetOptions = { metadata?: LocalBlobMetadata; onlyIfNew?: boolean; onlyIfMatch?: string };
+
+/** What a conditional (or unconditional) write answers — mirrors the real SDK's `WriteResult`. */
+export type LocalBlobWriteResult = { modified: boolean; etag?: string };
 
 export type LocalBlobStore = {
-  set: (key: string, value: LocalBlobValue, options?: LocalBlobSetOptions) => Promise<void>;
+  set: (key: string, value: LocalBlobValue, options?: LocalBlobSetOptions) => Promise<LocalBlobWriteResult>;
   get: (key: string) => Promise<string | null>;
   // Mirrors @netlify/blobs' Store.getWithMetadata (netlify-blobs.d.ts) closely enough for the
   // production code paths that call it to work unchanged against the local fallback.
@@ -64,13 +72,28 @@ export type LocalBlobStore = {
   getWithMetadata?: (
     key: string,
     options?: { type?: 'arrayBuffer' | 'buffer' | 'text' }
-  ) => Promise<{ data: unknown; metadata?: LocalBlobMetadata } | null>;
+  ) => Promise<{ data: unknown; metadata?: LocalBlobMetadata; etag?: string } | null>;
   del: (key: string) => Promise<void>;
-  setJSON: (key: string, value: unknown, options?: LocalBlobSetOptions) => Promise<void>;
+  setJSON: (key: string, value: unknown, options?: LocalBlobSetOptions) => Promise<LocalBlobWriteResult>;
   list: (options?: {
     prefix?: string;
     directories?: boolean;
   }) => Promise<{ blobs: Array<{ key: string; etag: string }>; directories: string[] }>;
+};
+
+/** The etag: a content hash computed fresh from what is on disk now, never stored — so an existing blob already has a valid one, no backfill needed. */
+const computeEtag = (bytes: Buffer | Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+
+const toBytes = (value: LocalBlobValue): Uint8Array =>
+  typeof value === 'string' ? Buffer.from(value, 'utf8') : new Uint8Array(value);
+
+const readRawBytes = async (storeName: string, key: string): Promise<Buffer | undefined> => {
+  try {
+    return await readFile(toPath(storeName, key));
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return undefined;
+    throw error;
+  }
 };
 
 const listFiles = async (current: string): Promise<string[]> => {
@@ -171,19 +194,34 @@ export const createLocalBlobStore = (storeName: string): LocalBlobStore => {
   return {
     async set(key, value, options) {
       const filePath = toPath(storeName, key);
+      const bytes = toBytes(value);
+
+      // P1: the condition is checked against whatever is on disk RIGHT NOW,
+      // immediately before the write — as close to atomic as a single
+      // process can make a check-then-write, which is what this shim is for
+      // (single-process local dev and sequential test execution, never a
+      // stand-in for the real backend's server-side atomicity).
+      if (options?.onlyIfNew || options?.onlyIfMatch !== undefined) {
+        const current = await readRawBytes(storeName, key);
+        if (options.onlyIfNew && current !== undefined) return { modified: false };
+        if (options.onlyIfMatch !== undefined) {
+          if (current === undefined || computeEtag(current) !== options.onlyIfMatch) return { modified: false };
+        }
+      }
 
       await mkdir(dirname(filePath), { recursive: true });
-      await writeFile(filePath, typeof value === 'string' ? value : new Uint8Array(value));
+      await writeFile(filePath, bytes);
       await writeMetadata(key, options?.metadata);
+      return { modified: true, etag: computeEtag(bytes) };
     },
 
     get: getBlob as LocalBlobStore['get'],
 
     async getWithMetadata(key, options) {
-      const data = await getBlob(key, options);
-      if (data === null) return null;
+      const [data, raw] = await Promise.all([getBlob(key, options), readRawBytes(storeName, key)]);
+      if (data === null || raw === undefined) return null;
 
-      return { data, metadata: await readMetadata(key) };
+      return { data, metadata: await readMetadata(key), etag: computeEtag(raw) };
     },
 
     async del(key) {
@@ -192,17 +230,35 @@ export const createLocalBlobStore = (storeName: string): LocalBlobStore => {
     },
 
     async setJSON(key, value, options) {
-      await this.set(key, JSON.stringify(value, null, 2), options);
+      return this.set(key, JSON.stringify(value, null, 2), options);
     },
 
     async list(options) {
       const prefix = options?.prefix ?? '';
       const files = await listFiles(join(storeRoot, prefix));
 
-      return {
-        blobs: files.map((filePath) => ({ key: toBlobKey(storeRoot, filePath), etag: '' })),
-        directories: [],
-      };
+      const blobs = await Promise.all(
+        files.map(async (filePath) => {
+          const key = toBlobKey(storeRoot, filePath);
+          // P1: a real etag, computed the same way `set`/`getWithMetadata` do,
+          // so a row cached against one agrees with the other — `index-store.ts`'s
+          // verified-row reuse compares a cached entry's etag against what a
+          // fresh `list()` reports, and that comparison is meaningless if this
+          // shim answers a constant `''` for every key, as it did before P1.
+          let etag = '';
+          try {
+            etag = computeEtag(await readFile(filePath));
+          } catch {
+            // Read lost a race with a concurrent delete/write in this same
+            // process; the listing still names the key, with an etag no
+            // verified-row check can match — the same safe "never trust"
+            // shape an unreadable blob gets in production.
+          }
+          return { key, etag };
+        })
+      );
+
+      return { blobs, directories: [] };
     },
   };
 };

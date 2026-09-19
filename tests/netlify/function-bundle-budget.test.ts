@@ -409,7 +409,7 @@ const BUDGETS_KB: Record<string, number> = {
   //
   // INTEGRATE (wave 2, 2026-09-16). The two numbers above were measured on two
   // branches that did not yet know about each other. On the INTEGRATED tree
-  // they add up and the cap busts at 531.2 KB / 57 modules, which is the whole
+  // the cap busts at 531.2 KB / 57 modules, which is the whole
   // point of measuring here rather than on a branch. No raise; two cuts, both
   // the leaf-spelling kind this note keeps describing:
   //
@@ -575,7 +575,18 @@ const BUDGETS_KB: Record<string, number> = {
   // empty states, notification scanning — into functions that render no screen.
   // Measured on the integrated tree: 3657.7 KB / 283 modules, 22 KB of room.
   // The `agent/tools.ts` definitions-vs-executors cut is STILL the debt.
-  'admin-agent-chat': 3680,
+  //
+  // P1 (2026-09-18) raised this 3680 -> 3700, measured 3691 KB. MODULE COUNT
+  // UNCHANGED at 284 — no new file, no new edge, no new subtree: every byte
+  // is conditional-write comments and code added to files this graph
+  // already carried (`objects/record-writer.ts` — the choke point every verb
+  // funnels through — plus `object-lock.ts`, `object-verbs.ts`,
+  // `object-publish.ts`, `object-retire.ts`, `membership/offboarding.ts`,
+  // `object-purge.ts`, `local-blobs.ts`, `blob-store.ts`). Already trimmed
+  // once for this raise; the `agent/tools.ts` definitions-vs-executors cut
+  // this file has been naming since A4 is still the debt to pay, and would
+  // buy back more than this raise costs.
+  'admin-agent-chat': 3700,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */
